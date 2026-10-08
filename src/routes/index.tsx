@@ -19,13 +19,13 @@ export const Route = createFileRoute("/")({
 const BANDS = ["Whale", "Frog", "Wind", "Rain", "Insect", "Canopy", "Thrush", "Wren", "Cicada", "Bat"];
 const BAND_HZ = ["32", "64", "125", "250", "500", "1K", "2K", "4K", "8K", "16K"];
 
-const PRESETS: Record<string, { goal: string; eco: string; v: number[]; why: string }> = {
+const PRESETS = {
   Calm: { goal: "High anxiety", eco: "Coastal mangrove dawn chorus", v: [40, 55, 70, 62, 48, 35, 58, 44, 30, 20], why: "Rhythmic regularity and soft spectral balance in the low-mids." },
   Create: { goal: "Creative work", eco: "Amazon rainforest canopy", v: [30, 45, 50, 60, 72, 80, 90, 85, 70, 55], why: "High vocal diversity and acoustic richness in upper bands." },
   Focus: { goal: "Deep focus", eco: "Arctic tundra windscape", v: [55, 60, 75, 70, 50, 30, 22, 18, 14, 10], why: "Low temporal complexity and steady broadband wind texture." },
   Sleep: { goal: "Sleep", eco: "Humpback whale communication", v: [90, 82, 64, 45, 30, 20, 14, 10, 8, 5], why: "Slow frequency modulation and dominant sub-bass contours." },
   Regulate: { goal: "Emotional regulation", eco: "Temperate forest after rainfall", v: [35, 48, 62, 74, 66, 55, 60, 48, 36, 26], why: "Even harmonic spacing with gentle droplet transients." },
-};
+} as Record<string, { goal: string; eco: string; v: number[]; why: string }>;
 
 const STAGES = [
   ["Global Bioacoustic Intelligence", "Millions of recordings from Macaulay Library, Xeno-Canto, NOAA and Rainforest Connection."],
@@ -37,8 +37,8 @@ const STAGES = [
 
 function Index() {
   const [preset, setPreset] = useState("Calm");
-  const [vals, setVals] = useState(PRESETS.Calm.v);
-  const p = PRESETS[preset];
+  const [vals, setVals] = useState(PRESETS["Calm"]!.v);
+  const p = PRESETS[preset]!;
   const health = Math.round(vals.reduce((a, b) => a + b, 0) / vals.length);
 
   return (
@@ -67,7 +67,7 @@ function Index() {
             <h2 className="font-display text-2xl font-semibold text-primary">Ecosystem Composer</h2>
             <div className="flex flex-wrap gap-2">
               {Object.keys(PRESETS).map((k) => (
-                <button key={k} onClick={() => { setPreset(k); setVals(PRESETS[k].v); }}
+                <button key={k} onClick={() => { setPreset(k); setVals(PRESETS[k]!.v); }}
                   className={`rounded-full px-4 py-1.5 text-sm transition ${k === preset ? "bg-primary text-primary-foreground" : "bg-secondary text-muted-foreground hover:text-foreground"}`}>
                   {k}
                 </button>
