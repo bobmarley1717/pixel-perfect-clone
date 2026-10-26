@@ -381,7 +381,7 @@ function AddBiomeModal({ taken, onClose, onCreate }: { taken: string[]; onClose:
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/70 backdrop-blur-sm animate-in fade-in" onClick={onClose}>
       <div role="dialog" aria-modal="true" aria-label="Add biome" onClick={(e) => e.stopPropagation()}
-        className="glass flex max-h-[80vh] w-[min(520px,90vw)] flex-col rounded-[2rem] p-8 animate-in zoom-in-95">
+        className="glass flex max-h-[80vh] w-[min(820px,92vw)] flex-col rounded-[2rem] p-8 animate-in zoom-in-95">
         <h3 className="font-display text-2xl font-semibold text-primary">Create your biome</h3>
         <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Biome name, e.g. Misty Fjord" maxLength={24}
           className="mt-4 rounded-full border border-input bg-secondary/60 px-5 py-2.5 text-sm outline-none focus:border-primary" />
@@ -401,7 +401,7 @@ function AddBiomeModal({ taken, onClose, onCreate }: { taken: string[]; onClose:
         </ul>
         <div className="mt-5 flex justify-end gap-2">
           <button onClick={onClose} className="rounded-full px-5 py-2 text-sm text-muted-foreground hover:text-foreground">Cancel</button>
-          <button disabled={!valid} onClick={() => onCreate(n, SOUND_LIBRARY.filter((s) => picked.includes(s.name)))}
+          <button disabled={!valid} onClick={() => onCreate(n, picked.map((s) => SOUND_LIBRARY.find((x) => x.name === s)!))}
             className="rounded-full bg-primary px-6 py-2 text-sm font-semibold text-primary-foreground glow disabled:opacity-40 disabled:shadow-none">Create biome</button>
         </div>
       </div>
