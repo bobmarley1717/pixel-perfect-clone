@@ -63,6 +63,19 @@ const BIOMES: Record<string, { tag: string; layers: Layer[] }> = {
   ] },
 };
 const BIOME_KEYS = Object.keys(BIOMES);
+const SOUND_LIBRARY: Layer[] = [
+  ...Object.values(BIOMES).flatMap((b) => b.layers),
+  { name: "Ocean waves", f: 400, q: 0.3, type: "lowpass" },
+  { name: "Seagulls", f: 3500, q: 10, type: "bandpass" },
+  { name: "Frog chorus", f: 1100, q: 12, type: "bandpass" },
+  { name: "Whale song", f: 120, q: 6, type: "bandpass" },
+  { name: "Crackling fire", f: 2200, q: 1.5, type: "highpass" },
+  { name: "Leaves rustling", f: 5000, q: 0.7, type: "bandpass" },
+  { name: "Snowfall hush", f: 200, q: 0.3, type: "lowpass" },
+  { name: "Cicada buzz", f: 7000, q: 15, type: "bandpass" },
+  { name: "Owl hoots", f: 450, q: 14, type: "bandpass" },
+  { name: "Bubbling brook", f: 1700, q: 3, type: "bandpass" },
+];
 const DEFAULT_LEVELS = () => Object.fromEntries(BIOME_KEYS.map((b) => [b, [60, 40, 50, 35]]));
 
 type View = "about" | "composer" | "equalizer" | "engine";
@@ -98,8 +111,11 @@ function Index() {
 }
 
 function BiomeEqualizer() {
+  const [biomes, setBiomes] = useState(BIOMES);
   const [biome, setBiome] = useState("Rainforest");
   const [levels, setLevels] = useState<Record<string, number[]>>(DEFAULT_LEVELS);
+  const [adding, setAdding] = useState(false);
+  const defaults = (n: number) => Array(n).fill(50) as number[];
   const [playing, setPlaying] = useState(false);
   const audio = useRef<{ ctx: AudioContext; gains: GainNode[]; analyser: AnalyserNode; srcs: AudioBufferSourceNode[] } | null>(null);
   const canvas = useRef<HTMLCanvasElement>(null);
@@ -124,7 +140,7 @@ function BiomeEqualizer() {
     analyser.connect(ctx.destination);
     const gains: GainNode[] = [];
     const srcs: AudioBufferSourceNode[] = [];
-    BIOMES[b]!.layers.forEach((L, i) => {
+    biomes[b]!.layers.forEach((L, i) => {
       const src = ctx.createBufferSource();
       src.buffer = buf; src.loop = true;
       src.playbackRate.value = 0.9 + i * 0.07;
@@ -177,20 +193,23 @@ function BiomeEqualizer() {
     return () => cancelAnimationFrame(raf);
   }, []);
 
-  const energy = Math.round(lv.reduce((a, b) => a + b, 0) / 4);
+  const energy = Math.round(lv.reduce((a, b) => a + b, 0) / lv.length);
 
   return (
     <div className="grid h-full grid-cols-[240px_1fr_280px] gap-6">
       <aside className="glass flex flex-col gap-2 rounded-3xl p-4">
         <p className="px-2 pb-2 text-xs uppercase tracking-widest text-muted-foreground">Biomes</p>
-        {BIOME_KEYS.map((b) => (
+        <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto pr-1">
+        {Object.keys(biomes).map((b) => (
           <button key={b} onClick={() => setBiome(b)}
             className={`rounded-2xl px-4 py-3 text-left transition hover:translate-x-1 ${b === biome ? "bg-primary text-primary-foreground glow" : "bg-secondary/50 hover:bg-secondary"}`}>
             <span className="block font-display font-semibold">{b}</span>
-            <span className={`text-xs ${b === biome ? "text-primary-foreground/80" : "text-muted-foreground"}`}>{BIOMES[b]!.tag}</span>
+            <span className={`text-xs ${b === biome ? "text-primary-foreground/80" : "text-muted-foreground"}`}>{biomes[b]!.tag}</span>
           </button>
         ))}
-        <button onClick={() => setPlaying(!playing)} className="mt-auto rounded-full bg-primary px-5 py-3 text-sm font-semibold text-primary-foreground glow transition hover:scale-[1.02]">
+        <button onClick={() => setAdding(true)} className="rounded-2xl border border-dashed border-primary/50 px-4 py-3 text-left text-sm text-primary transition hover:bg-primary/10">+ Add biome</button>
+        </div>
+        <button onClick={() => setPlaying(!playing)} className="mt-2 rounded-full bg-primary px-5 py-3 text-sm font-semibold text-primary-foreground glow transition hover:scale-[1.02]">
           {playing ? "Pause soundscape" : "Play soundscape"}
         </button>
       </aside>
@@ -201,8 +220,8 @@ function BiomeEqualizer() {
           <span className="text-xs text-muted-foreground">{playing ? "Live spectrum" : "Preview spectrum"}</span>
         </div>
         <canvas ref={canvas} className="h-[30%] w-full rounded-2xl bg-track/60" />
-        <div className="grid min-h-0 flex-1 grid-cols-4 gap-4">
-          {BIOMES[biome]!.layers.map((L, i) => (
+        <div className="grid min-h-0 flex-1 gap-4" style={{ gridTemplateColumns: `repeat(${lv.length}, minmax(0, 1fr))` }}>
+          {biomes[biome]!.layers.map((L, i) => (
             <div key={L.name} className="flex min-h-0 flex-col items-center rounded-2xl bg-muted/60 p-4 transition hover:bg-muted">
               <span className="font-display text-3xl font-semibold text-primary tabular-nums">{lv[i]}</span>
               <div className="relative my-4 w-3 flex-1 rounded-full bg-track">
@@ -228,7 +247,7 @@ function BiomeEqualizer() {
         <div className="glass flex-1 rounded-3xl p-5">
           <p className="text-xs uppercase tracking-widest text-muted-foreground">Layer mix</p>
           <ul className="mt-3 space-y-3">
-            {BIOMES[biome]!.layers.map((L, i) => (
+            {biomes[biome]!.layers.map((L, i) => (
               <li key={L.name}>
                 <div className="flex justify-between text-sm"><span>{L.name}</span><span className="text-muted-foreground">{lv[i]}%</span></div>
                 <div className="mt-1 h-1 rounded-full bg-track"><div className="h-full rounded-full bg-accent transition-all" style={{ width: `${lv[i]}%` }} /></div>
@@ -236,8 +255,13 @@ function BiomeEqualizer() {
             ))}
           </ul>
         </div>
-        <button onClick={() => setLevels({ ...levels, [biome]: [60, 40, 50, 35] })} className="glass rounded-full px-5 py-3 text-sm text-muted-foreground transition hover:text-foreground">Reset biome</button>
+        <button onClick={() => setLevels({ ...levels, [biome]: BIOMES[biome] ? [60, 40, 50, 35] : defaults(lv.length) })} className="glass rounded-full px-5 py-3 text-sm text-muted-foreground transition hover:text-foreground">Reset biome</button>
       </aside>
+      {adding && <AddBiomeModal taken={Object.keys(biomes)} onClose={() => setAdding(false)} onCreate={(name, layers) => {
+        setBiomes({ ...biomes, [name]: { tag: "Custom biome", layers } });
+        setLevels({ ...levels, [name]: defaults(layers.length) });
+        setBiome(name); setAdding(false);
+      }} />}
     </div>
   );
 }
@@ -338,6 +362,48 @@ function About({ onStart }: { onStart: () => void }) {
           <li><b>Learn the species</b> — each session reveals the ecosystems behind the sound.</li>
           <li><b>Gets more personal</b> — mood and listening feedback refine every next session.</li>
         </ul>
+      </div>
+    </div>
+  );
+}
+
+function AddBiomeModal({ taken, onClose, onCreate }: { taken: string[]; onClose: () => void; onCreate: (name: string, layers: Layer[]) => void }) {
+  const [name, setName] = useState("");
+  const [picked, setPicked] = useState<string[]>([]);
+  const n = name.trim();
+  const valid = n.length > 0 && !taken.includes(n) && picked.length > 0;
+  const toggle = (s: string) => setPicked(picked.includes(s) ? picked.filter((x) => x !== s) : picked.length < 6 ? [...picked, s] : picked);
+  useEffect(() => {
+    const k = (e: KeyboardEvent) => e.key === "Escape" && onClose();
+    window.addEventListener("keydown", k);
+    return () => window.removeEventListener("keydown", k);
+  }, [onClose]);
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/70 backdrop-blur-sm animate-in fade-in" onClick={onClose}>
+      <div role="dialog" aria-modal="true" aria-label="Add biome" onClick={(e) => e.stopPropagation()}
+        className="glass flex max-h-[80vh] w-[min(520px,90vw)] flex-col rounded-[2rem] p-8 animate-in zoom-in-95">
+        <h3 className="font-display text-2xl font-semibold text-primary">Create your biome</h3>
+        <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Biome name, e.g. Misty Fjord" maxLength={24}
+          className="mt-4 rounded-full border border-input bg-secondary/60 px-5 py-2.5 text-sm outline-none focus:border-primary" />
+        {taken.includes(n) && <p className="mt-1 px-2 text-xs text-destructive">That name is already used.</p>}
+        <p className="mt-5 text-xs uppercase tracking-widest text-muted-foreground">Pick sounds ({picked.length}/6)</p>
+        <ul className="mt-2 min-h-0 flex-1 space-y-1.5 overflow-y-auto pr-2">
+          {SOUND_LIBRARY.map((s) => {
+            const on = picked.includes(s.name);
+            return (
+              <li key={s.name}>
+                <button onClick={() => toggle(s.name)} className={`flex w-full items-center justify-between rounded-xl px-4 py-2.5 text-left text-sm transition ${on ? "bg-primary text-primary-foreground" : "bg-secondary/50 hover:bg-secondary"}`}>
+                  <span>{s.name}</span><span className="text-xs opacity-70">{on ? "Added" : "+"}</span>
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+        <div className="mt-5 flex justify-end gap-2">
+          <button onClick={onClose} className="rounded-full px-5 py-2 text-sm text-muted-foreground hover:text-foreground">Cancel</button>
+          <button disabled={!valid} onClick={() => onCreate(n, SOUND_LIBRARY.filter((s) => picked.includes(s.name)))}
+            className="rounded-full bg-primary px-6 py-2 text-sm font-semibold text-primary-foreground glow disabled:opacity-40 disabled:shadow-none">Create biome</button>
+        </div>
       </div>
     </div>
   );
