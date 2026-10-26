@@ -65,11 +65,10 @@ const BIOMES: Record<string, { tag: string; layers: Layer[] }> = {
 const BIOME_KEYS = Object.keys(BIOMES);
 const DEFAULT_LEVELS = () => Object.fromEntries(BIOME_KEYS.map((b) => [b, [60, 40, 50, 35]]));
 
-type View = "equalizer" | "composer" | "engine";
+type View = "about" | "composer" | "equalizer" | "engine";
 
 function Index() {
-  const [view, setView] = useState<View>("equalizer");
-  const [about, setAbout] = useState(false);
+  const [view, setView] = useState<View>("about");
 
   return (
     <main className="flex h-screen w-screen flex-col overflow-hidden font-sans">
@@ -79,22 +78,21 @@ function Index() {
           <span className="font-display text-lg font-semibold">EchoNature<span className="text-primary"> AI</span></span>
         </div>
         <nav className="flex items-center gap-1 rounded-full bg-secondary/60 p-1">
-          {([["equalizer", "Biome Equalizer"], ["composer", "Ecosystem Composer"], ["engine", "Engine"]] as [View, string][]).map(([k, l]) => (
+          {([["about", "About"], ["composer", "Ecosystem Composer"], ["equalizer", "Biome Equalizer"], ["engine", "Engine"]] as [View, string][]).map(([k, l]) => (
             <button key={k} onClick={() => setView(k)}
               className={`rounded-full px-4 py-1.5 text-sm transition ${view === k ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"}`}>{l}</button>
           ))}
-          <button onClick={() => setAbout(true)} className="rounded-full px-4 py-1.5 text-sm text-muted-foreground transition hover:text-foreground">About</button>
         </nav>
         <p className="hidden text-xs uppercase tracking-[0.3em] text-primary xl:block">Bioacoustic foundation model</p>
       </header>
 
       <div className="min-h-0 flex-1 p-6">
-        {view === "equalizer" && <BiomeEqualizer />}
+        {view === "about" && <About onStart={() => setView("composer")} />}
         {view === "composer" && <Composer />}
+        {view === "equalizer" && <BiomeEqualizer />}
         {view === "engine" && <Engine />}
       </div>
 
-      {about && <AboutModal onClose={() => setAbout(false)} />}
     </main>
   );
 }
@@ -223,7 +221,7 @@ function BiomeEqualizer() {
 
       <aside className="flex flex-col gap-4">
         <div className="glass rounded-3xl p-5">
-          <p className="text-xs uppercase tracking-widest text-muted-foreground">Biome energy</p>
+          <p className="text-xs uppercase tracking-widest text-muted-foreground">Acoustic Health Index</p>
           <p className="mt-1 font-display text-5xl font-semibold text-primary">{energy}</p>
           <div className="mt-3 h-1.5 rounded-full bg-track"><div className="bar-fill h-full rounded-full transition-all" style={{ width: `${energy}%` }} /></div>
         </div>
@@ -318,34 +316,28 @@ function Engine() {
   );
 }
 
-function AboutModal({ onClose }: { onClose: () => void }) {
-  useEffect(() => {
-    const k = (e: KeyboardEvent) => e.key === "Escape" && onClose();
-    window.addEventListener("keydown", k);
-    return () => window.removeEventListener("keydown", k);
-  }, [onClose]);
+function About({ onStart }: { onStart: () => void }) {
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/70 backdrop-blur-sm animate-in fade-in" onClick={onClose}>
-      <div role="dialog" aria-modal="true" aria-label="About EchoNature AI" onClick={(e) => e.stopPropagation()}
-        className="glass grid w-[min(960px,90vw)] grid-cols-2 gap-8 rounded-[2rem] p-10 animate-in zoom-in-95">
-        <div>
-          <p className="text-xs uppercase tracking-[0.3em] text-primary">Our goal</p>
-          <h3 className="mt-3 font-display text-2xl font-semibold">Healthcare personalized through ecology</h3>
-          <p className="mt-3 text-sm text-muted-foreground">
-            EchoNature AI is building a bioacoustic foundation model that learns from millions of wildlife recordings. Our mission is to turn the sound of living ecosystems into personalized digital therapeutics — while every listen supports and teaches biodiversity conservation.
-          </p>
-        </div>
-        <div>
-          <p className="text-xs uppercase tracking-[0.3em] text-primary">How it helps</p>
-          <ul className="mt-3 space-y-3 text-sm">
-            <li><b>Calm anxiety & stress</b> — soundscapes tuned to slow, regular natural rhythms.</li>
-            <li><b>Focus & create</b> — pick a biome and shape its layers to mask distractions.</li>
-            <li><b>Sleep better</b> — low, steady textures like whale song and cave hum.</li>
-            <li><b>Learn the species</b> — each session reveals the ecosystems behind the sound.</li>
-            <li><b>Gets more personal</b> — mood and listening feedback refine every next session.</li>
-          </ul>
-        </div>
-        <button onClick={onClose} className="col-span-2 justify-self-end rounded-full bg-primary px-6 py-2 text-sm font-semibold text-primary-foreground glow">Close</button>
+    <div className="grid h-full grid-cols-2 items-center gap-10 px-6">
+      <div>
+        <p className="text-xs uppercase tracking-[0.3em] text-primary">Our goal</p>
+        <h1 className="mt-4 font-display text-5xl font-light leading-tight xl:text-6xl">
+          Nature becomes the dataset. <span className="font-semibold text-primary">AI becomes the interpreter.</span>
+        </h1>
+        <p className="mt-6 max-w-xl text-muted-foreground">
+          EchoNature AI is building a bioacoustic foundation model that learns from millions of wildlife recordings. Our mission is to turn the sound of living ecosystems into personalized digital therapeutics — while every listen supports and teaches biodiversity conservation.
+        </p>
+        <button onClick={onStart} className="mt-8 rounded-full bg-primary px-6 py-3 text-sm font-semibold text-primary-foreground glow transition hover:scale-[1.02]">Start a session</button>
+      </div>
+      <div className="glass rounded-[2rem] p-8">
+        <p className="text-xs uppercase tracking-[0.3em] text-primary">How it helps</p>
+        <ul className="mt-4 space-y-4 text-sm">
+          <li><b>Calm anxiety & stress</b> — soundscapes tuned to slow, regular natural rhythms.</li>
+          <li><b>Focus & create</b> — pick a biome and shape its layers to mask distractions.</li>
+          <li><b>Sleep better</b> — low, steady textures like whale song and cave hum.</li>
+          <li><b>Learn the species</b> — each session reveals the ecosystems behind the sound.</li>
+          <li><b>Gets more personal</b> — mood and listening feedback refine every next session.</li>
+        </ul>
       </div>
     </div>
   );
