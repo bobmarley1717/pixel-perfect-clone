@@ -422,8 +422,10 @@ function suggestName(picked: string[]) {
     .map((r) => ({ name: r.name, hits: r.sounds.filter((s) => picked.includes(s)).length, size: r.sounds.length }))
     .filter((r) => r.hits >= 2)
     .sort((a, b) => b.hits - a.hits || a.size - b.size);
-  if (scored.length) return scored[0].name;
-  if (picked.length === 1) return SINGLE_NAMES[picked[0]] ?? DEFAULT_BIOME_NAME;
+  const best = scored[0];
+  if (best) return best.name;
+  const only = picked.length === 1 ? picked[0] : undefined;
+  return (only && SINGLE_NAMES[only]) || DEFAULT_BIOME_NAME;
   return DEFAULT_BIOME_NAME;
 }
 
