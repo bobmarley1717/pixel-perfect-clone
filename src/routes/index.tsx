@@ -75,6 +75,8 @@ const SOUND_LIBRARY: Layer[] = [
   { name: "Cicada buzz", f: 7000, q: 15, type: "bandpass" },
   { name: "Owl hoots", f: 450, q: 14, type: "bandpass" },
   { name: "Bubbling brook", f: 1700, q: 3, type: "bandpass" },
+  { name: "Reef fish", f: 900, q: 6, type: "bandpass" },
+  { name: "Coral snaps", f: 3000, q: 8, type: "bandpass" },
 ];
 const DEFAULT_LEVELS = () => Object.fromEntries(BIOME_KEYS.map((b) => [b, [60, 40, 50, 35]]));
 
@@ -367,7 +369,23 @@ function About({ onStart }: { onStart: () => void }) {
   );
 }
 
-const NAME_SUGGESTIONS: Record<string, string> = {
+const DEFAULT_BIOME_NAME = "My Biome";
+// Sounds that belong together. A name is suggested from the whole combination picked, not one sound.
+const NAME_RECIPES: { name: string; sounds: string[] }[] = [
+  { name: "Coral Reef", sounds: ["Reef fish", "Coral snaps", "Ocean waves", "Seagulls"] },
+  { name: "Thunderstorm Forest", sounds: ["Distant thunder", "Canopy rainfall", "Humidity / wind"] },
+  { name: "Rainforest Canopy", sounds: ["Canopy rainfall", "Wildlife / birds", "Humidity / wind", "Leaves rustling", "Cicada buzz"] },
+  { name: "Desert Night", sounds: ["Night crickets", "Shifting sand", "Thermal breeze", "Howling wind"] },
+  { name: "Echo Cavern", sounds: ["Water drops", "Echoes", "Subterranean hum", "Underground stream"] },
+  { name: "Cascade Gorge", sounds: ["Heavy water roar", "Mist / spray", "River rapids", "Ambient splash"] },
+  { name: "Tidal Shore", sounds: ["Ocean waves", "Seagulls", "Whale song"] },
+  { name: "Marsh Hollow", sounds: ["Frog chorus", "Bubbling brook", "Water drops"] },
+  { name: "Night Wood", sounds: ["Owl hoots", "Leaves rustling", "Night crickets", "Cicada buzz"] },
+  { name: "Ember Camp", sounds: ["Crackling fire", "Owl hoots", "Leaves rustling", "Snowfall hush"] },
+  { name: "Brook Forest", sounds: ["Bubbling brook", "Leaves rustling", "Wildlife / birds", "Canopy rainfall"] },
+];
+// Used only when a single sound is picked.
+const SINGLE_NAMES: Record<string, string> = {
   "Canopy rainfall": "Rain Canopy",
   "Distant thunder": "Thunder Hollow",
   "Wildlife / birds": "Bird Canopy",
@@ -394,23 +412,19 @@ const NAME_SUGGESTIONS: Record<string, string> = {
   "Cicada buzz": "High Summer",
   "Owl hoots": "Night Hollow",
   "Bubbling brook": "Bubbling Brook",
+  "Reef fish": "Reef Shoal",
+  "Coral snaps": "Reef Shoal",
 };
-const DEFAULT_BIOME_NAME = "My Biome";
+
 function suggestName(picked: string[]) {
-  const tally = new Map<string, number>();
-  for (const s of picked) {
-    const nm = NAME_SUGGESTIONS[s];
-    if (nm) tally.set(nm, (tally.get(nm) ?? 0) + 1);
-  }
-  let best = "";
-  let bestCount = 0;
-  for (const s of picked) {
-    const nm = NAME_SUGGESTIONS[s];
-    if (!nm) continue;
-    const c = tally.get(nm) ?? 0;
-    if (c > bestCount) { best = nm; bestCount = c; }
-  }
-  return best || DEFAULT_BIOME_NAME;
+  if (picked.length === 0) return DEFAULT_BIOME_NAME;
+  const scored = NAME_RECIPES
+    .map((r) => ({ name: r.name, hits: r.sounds.filter((s) => picked.includes(s)).length, size: r.sounds.length }))
+    .filter((r) => r.hits >= 2)
+    .sort((a, b) => b.hits - a.hits || a.size - b.size);
+  if (scored.length) return scored[0].name;
+  if (picked.length === 1) return SINGLE_NAMES[picked[0]] ?? DEFAULT_BIOME_NAME;
+  return DEFAULT_BIOME_NAME;
 }
 
 function AddBiomeModal({ taken, onClose, onCreate }: { taken: string[]; onClose: () => void; onCreate: (name: string, layers: Layer[]) => void }) {
