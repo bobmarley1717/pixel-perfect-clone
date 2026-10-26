@@ -367,6 +367,52 @@ function About({ onStart }: { onStart: () => void }) {
   );
 }
 
+const NAME_SUGGESTIONS: Record<string, string> = {
+  "Canopy rainfall": "Rain Canopy",
+  "Distant thunder": "Thunder Hollow",
+  "Wildlife / birds": "Bird Canopy",
+  "Humidity / wind": "Humid Wind",
+  "Howling wind": "Windward Dunes",
+  "Shifting sand": "Drifting Sands",
+  "Night crickets": "Cricket Night",
+  "Thermal breeze": "Warm Thermal",
+  "Water drops": "Drip Cavern",
+  "Subterranean hum": "Deep Stone",
+  "Echoes": "Echo Chamber",
+  "Underground stream": "Sunken River",
+  "Heavy water roar": "Falling Water",
+  "Mist / spray": "Spray Cliff",
+  "River rapids": "Rushing Rapids",
+  "Ambient splash": "Splash Pool",
+  "Ocean waves": "Tidal Shore",
+  "Seagulls": "Gull Coast",
+  "Frog chorus": "Marsh Hollow",
+  "Whale song": "Deep Current",
+  "Crackling fire": "Ember Clearing",
+  "Leaves rustling": "Rustling Grove",
+  "Snowfall hush": "Frozen Hush",
+  "Cicada buzz": "High Summer",
+  "Owl hoots": "Night Hollow",
+  "Bubbling brook": "Bubbling Brook",
+};
+const DEFAULT_BIOME_NAME = "My Biome";
+function suggestName(picked: string[]) {
+  const tally = new Map<string, number>();
+  for (const s of picked) {
+    const nm = NAME_SUGGESTIONS[s];
+    if (nm) tally.set(nm, (tally.get(nm) ?? 0) + 1);
+  }
+  let best = "";
+  let bestCount = 0;
+  for (const s of picked) {
+    const nm = NAME_SUGGESTIONS[s];
+    if (!nm) continue;
+    const c = tally.get(nm) ?? 0;
+    if (c > bestCount) { best = nm; bestCount = c; }
+  }
+  return best || DEFAULT_BIOME_NAME;
+}
+
 function AddBiomeModal({ taken, onClose, onCreate }: { taken: string[]; onClose: () => void; onCreate: (name: string, layers: Layer[]) => void }) {
   const [name, setName] = useState("");
   const [picked, setPicked] = useState<string[]>([]);
@@ -383,7 +429,7 @@ function AddBiomeModal({ taken, onClose, onCreate }: { taken: string[]; onClose:
       <div role="dialog" aria-modal="true" aria-label="Add biome" onClick={(e) => e.stopPropagation()}
         className="glass flex max-h-[80vh] w-[min(820px,92vw)] flex-col rounded-[2rem] p-8 animate-in zoom-in-95">
         <h3 className="font-display text-2xl font-semibold text-primary">Create your biome</h3>
-        <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Biome name, e.g. Misty Fjord" maxLength={24}
+        <input value={name} onChange={(e) => setName(e.target.value)} placeholder={`Biome name, e.g. ${suggestName(picked)}`} maxLength={24}
           className="mt-4 rounded-full border border-input bg-secondary/60 px-5 py-2.5 text-sm outline-none focus:border-primary" />
         {taken.includes(n) && <p className="mt-1 px-2 text-xs text-destructive">That name is already used.</p>}
         <p className="mt-5 text-xs uppercase tracking-widest text-muted-foreground">Pick sounds ({picked.length}/6)</p>
