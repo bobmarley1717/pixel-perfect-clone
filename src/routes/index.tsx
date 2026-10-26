@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import logo from "@/assets/logo.jpg.asset.json";
 
 export const Route = createFileRoute("/")({
@@ -35,98 +35,318 @@ const STAGES = [
   ["Continuous Learning", "Mood, listening duration and HRV feedback refine every next session."],
 ];
 
+type Layer = { name: string; f: number; q: number; type: BiquadFilterType };
+const BIOMES: Record<string, { tag: string; layers: Layer[] }> = {
+  Rainforest: { tag: "Humid canopy, dense life", layers: [
+    { name: "Canopy rainfall", f: 3000, q: 0.6, type: "bandpass" },
+    { name: "Distant thunder", f: 80, q: 1, type: "lowpass" },
+    { name: "Wildlife / birds", f: 4500, q: 8, type: "bandpass" },
+    { name: "Humidity / wind", f: 600, q: 0.5, type: "bandpass" },
+  ] },
+  Desert: { tag: "Open dunes, dry air", layers: [
+    { name: "Howling wind", f: 400, q: 4, type: "bandpass" },
+    { name: "Shifting sand", f: 6000, q: 0.8, type: "highpass" },
+    { name: "Night crickets", f: 5200, q: 20, type: "bandpass" },
+    { name: "Thermal breeze", f: 250, q: 0.4, type: "lowpass" },
+  ] },
+  Cave: { tag: "Stone, echo, darkness", layers: [
+    { name: "Water drops", f: 1800, q: 15, type: "bandpass" },
+    { name: "Subterranean hum", f: 60, q: 2, type: "lowpass" },
+    { name: "Echoes", f: 900, q: 3, type: "bandpass" },
+    { name: "Underground stream", f: 1200, q: 0.7, type: "bandpass" },
+  ] },
+  Waterfall: { tag: "Falling water, spray", layers: [
+    { name: "Heavy water roar", f: 300, q: 0.4, type: "lowpass" },
+    { name: "Mist / spray", f: 8000, q: 0.5, type: "highpass" },
+    { name: "River rapids", f: 1500, q: 0.6, type: "bandpass" },
+    { name: "Ambient splash", f: 2500, q: 2, type: "bandpass" },
+  ] },
+};
+const BIOME_KEYS = Object.keys(BIOMES);
+const DEFAULT_LEVELS = () => Object.fromEntries(BIOME_KEYS.map((b) => [b, [60, 40, 50, 35]]));
+
+type View = "equalizer" | "composer" | "engine";
+
 function Index() {
-  const [preset, setPreset] = useState("Calm");
-  const [vals, setVals] = useState(PRESETS["Calm"]!.v);
-  const p = PRESETS[preset]!;
-  const health = Math.round(vals.reduce((a, b) => a + b, 0) / vals.length);
+  const [view, setView] = useState<View>("equalizer");
+  const [about, setAbout] = useState(false);
 
   return (
-    <main className="min-h-screen font-sans">
-      <header className="mx-auto flex max-w-6xl items-center justify-between px-6 py-6">
+    <main className="flex h-screen w-screen flex-col overflow-hidden font-sans">
+      <header className="glass z-10 flex w-full shrink-0 items-center justify-between border-b border-border px-8 py-4">
         <div className="flex items-center gap-3">
-          <img src={logo.url} alt="EchoNature AI logo" className="h-10 w-10 rounded-full" />
+          <img src={logo.url} alt="EchoNature AI logo" className="h-10 w-10 rounded-full object-cover" />
           <span className="font-display text-lg font-semibold">EchoNature<span className="text-primary"> AI</span></span>
         </div>
-        <a href="#mixer" className="rounded-full bg-primary px-5 py-2 text-sm font-semibold text-primary-foreground glow">Start a session</a>
+        <nav className="flex items-center gap-1 rounded-full bg-secondary/60 p-1">
+          {([["equalizer", "Biome Equalizer"], ["composer", "Ecosystem Composer"], ["engine", "Engine"]] as [View, string][]).map(([k, l]) => (
+            <button key={k} onClick={() => setView(k)}
+              className={`rounded-full px-4 py-1.5 text-sm transition ${view === k ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"}`}>{l}</button>
+          ))}
+          <button onClick={() => setAbout(true)} className="rounded-full px-4 py-1.5 text-sm text-muted-foreground transition hover:text-foreground">About</button>
+        </nav>
+        <p className="hidden text-xs uppercase tracking-[0.3em] text-primary xl:block">Bioacoustic foundation model</p>
       </header>
 
-      <section className="mx-auto max-w-6xl px-6 pb-16 pt-12">
-        <p className="text-sm uppercase tracking-[0.3em] text-primary">Bioacoustic foundation model</p>
-        <h1 className="mt-4 max-w-4xl font-display text-5xl font-light leading-tight md:text-7xl">
-          Nature becomes the dataset. <span className="font-semibold text-primary">AI becomes the interpreter.</span>
-        </h1>
-        <p className="mt-6 max-w-2xl text-lg text-muted-foreground">
-          Personalized therapeutic soundscapes composed from the acoustic structure of living ecosystems — and every session teaches you the species behind the sound.
-        </p>
-      </section>
+      <div className="min-h-0 flex-1 p-6">
+        {view === "equalizer" && <BiomeEqualizer />}
+        {view === "composer" && <Composer />}
+        {view === "engine" && <Engine />}
+      </div>
 
-      <section id="mixer" className="mx-auto max-w-6xl px-6 pb-24">
-        <div className="rounded-[2rem] bg-card p-6 md:p-10">
-          <div className="flex flex-wrap items-center justify-between gap-4">
-            <h2 className="font-display text-2xl font-semibold text-primary">Ecosystem Composer</h2>
-            <div className="flex flex-wrap gap-2">
-              {Object.keys(PRESETS).map((k) => (
-                <button key={k} onClick={() => { setPreset(k); setVals(PRESETS[k]!.v); }}
-                  className={`rounded-full px-4 py-1.5 text-sm transition ${k === preset ? "bg-primary text-primary-foreground" : "bg-secondary text-muted-foreground hover:text-foreground"}`}>
-                  {k}
-                </button>
-              ))}
-            </div>
-          </div>
+      {about && <AboutModal onClose={() => setAbout(false)} />}
+    </main>
+  );
+}
 
-          <div className="mt-8 grid gap-6 md:grid-cols-[1fr_260px]">
-            <div className="rounded-3xl bg-muted p-6">
-              <div className="flex h-72 items-end justify-between gap-2">
-                {vals.map((v, i) => (
-                  <div key={i} className="flex h-full flex-1 flex-col items-center">
-                    <div className="relative h-full w-2 rounded-full bg-track">
-                      <div className="bar-fill absolute bottom-0 w-full rounded-full transition-all duration-500" style={{ height: `${v}%` }} />
-                      <div className="absolute left-1/2 h-5 w-5 -translate-x-1/2 translate-y-1/2 rounded-full border-2 border-primary bg-secondary transition-all duration-500" style={{ bottom: `${v}%` }} />
-                      <input type="range" min={0} max={100} value={v} aria-label={BANDS[i]}
-                        onChange={(e) => setVals(vals.map((x, j) => (j === i ? +e.target.value : x)))}
-                        className="absolute left-1/2 top-0 h-full w-8 -translate-x-1/2 cursor-pointer opacity-0 [writing-mode:vertical-lr] [direction:rtl]" />
-                    </div>
-                    <span className="mt-4 text-xs text-foreground">{BAND_HZ[i]}</span>
-                    <span className="text-[10px] text-muted-foreground">{BANDS[i]}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-            <aside className="flex flex-col gap-4">
-              <div className="rounded-3xl bg-muted p-5">
-                <p className="text-xs uppercase tracking-widest text-muted-foreground">{p.goal}</p>
-                <p className="mt-2 font-display text-lg">{p.eco}</p>
-              </div>
-              <div className="rounded-3xl bg-muted p-5">
-                <p className="text-xs uppercase tracking-widest text-muted-foreground">Acoustic Health Index</p>
-                <p className="mt-1 font-display text-4xl font-semibold text-primary">{health}</p>
-              </div>
-              <div className="flex-1 rounded-3xl bg-muted p-5">
-                <p className="text-xs uppercase tracking-widest text-muted-foreground">Why this ecosystem</p>
-                <p className="mt-2 text-sm">{p.why}</p>
-              </div>
-            </aside>
-          </div>
+function BiomeEqualizer() {
+  const [biome, setBiome] = useState("Rainforest");
+  const [levels, setLevels] = useState<Record<string, number[]>>(DEFAULT_LEVELS);
+  const [playing, setPlaying] = useState(false);
+  const audio = useRef<{ ctx: AudioContext; gains: GainNode[]; analyser: AnalyserNode; srcs: AudioBufferSourceNode[] } | null>(null);
+  const canvas = useRef<HTMLCanvasElement>(null);
+  const lv = levels[biome]!;
+  const levelsRef = useRef(lv);
+  levelsRef.current = lv;
+
+  const stop = () => {
+    audio.current?.srcs.forEach((s) => s.stop());
+    audio.current?.ctx.close();
+    audio.current = null;
+  };
+
+  const start = (b: string) => {
+    stop();
+    const ctx = new AudioContext();
+    const buf = ctx.createBuffer(1, ctx.sampleRate * 2, ctx.sampleRate);
+    const d = buf.getChannelData(0);
+    for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+    const analyser = ctx.createAnalyser();
+    analyser.fftSize = 128;
+    analyser.connect(ctx.destination);
+    const gains: GainNode[] = [];
+    const srcs: AudioBufferSourceNode[] = [];
+    BIOMES[b]!.layers.forEach((L, i) => {
+      const src = ctx.createBufferSource();
+      src.buffer = buf; src.loop = true;
+      src.playbackRate.value = 0.9 + i * 0.07;
+      const f = ctx.createBiquadFilter();
+      f.type = L.type; f.frequency.value = L.f; f.Q.value = L.q;
+      const g = ctx.createGain();
+      g.gain.value = (levelsRef.current[i]! / 100) * 0.35;
+      src.connect(f).connect(g).connect(analyser);
+      src.start();
+      gains.push(g); srcs.push(src);
+    });
+    audio.current = { ctx, gains, analyser, srcs };
+  };
+
+  useEffect(() => { if (playing) start(biome); return stop; }, [playing, biome]);
+  useEffect(() => {
+    audio.current?.gains.forEach((g, i) => g.gain.setTargetAtTime((lv[i]! / 100) * 0.35, audio.current!.ctx.currentTime, 0.1));
+  }, [lv]);
+
+  useEffect(() => {
+    let raf = 0; let t = 0;
+    const draw = () => {
+      const c = canvas.current; if (!c) return;
+      const g = c.getContext("2d")!;
+      const w = (c.width = c.clientWidth), h = (c.height = c.clientHeight);
+      const n = 64;
+      let data: number[];
+      if (audio.current) {
+        const arr = new Uint8Array(audio.current.analyser.frequencyBinCount);
+        audio.current.analyser.getByteFrequencyData(arr);
+        data = Array.from(arr, (x) => x / 255);
+      } else {
+        t += 0.03;
+        data = Array.from({ length: n }, (_, i) => {
+          const l = levelsRef.current[Math.floor((i / n) * 4)]! / 100;
+          return l * (0.55 + 0.35 * Math.sin(t + i * 0.5) * Math.cos(t * 0.7 + i * 0.13));
+        });
+      }
+      const styles = getComputedStyle(document.documentElement);
+      const col = styles.getPropertyValue("--primary").trim();
+      const bw = w / data.length;
+      data.forEach((v, i) => {
+        const bh = Math.max(4, v * h * 0.9);
+        g.fillStyle = col; g.globalAlpha = 0.35 + v * 0.65;
+        g.beginPath(); g.roundRect(i * bw + 2, h - bh, bw - 4, bh, 4); g.fill();
+      });
+      raf = requestAnimationFrame(draw);
+    };
+    raf = requestAnimationFrame(draw);
+    return () => cancelAnimationFrame(raf);
+  }, []);
+
+  const energy = Math.round(lv.reduce((a, b) => a + b, 0) / 4);
+
+  return (
+    <div className="grid h-full grid-cols-[240px_1fr_280px] gap-6">
+      <aside className="glass flex flex-col gap-2 rounded-3xl p-4">
+        <p className="px-2 pb-2 text-xs uppercase tracking-widest text-muted-foreground">Biomes</p>
+        {BIOME_KEYS.map((b) => (
+          <button key={b} onClick={() => setBiome(b)}
+            className={`rounded-2xl px-4 py-3 text-left transition hover:translate-x-1 ${b === biome ? "bg-primary text-primary-foreground glow" : "bg-secondary/50 hover:bg-secondary"}`}>
+            <span className="block font-display font-semibold">{b}</span>
+            <span className={`text-xs ${b === biome ? "text-primary-foreground/80" : "text-muted-foreground"}`}>{BIOMES[b]!.tag}</span>
+          </button>
+        ))}
+        <button onClick={() => setPlaying(!playing)} className="mt-auto rounded-full bg-primary px-5 py-3 text-sm font-semibold text-primary-foreground glow transition hover:scale-[1.02]">
+          {playing ? "Pause soundscape" : "Play soundscape"}
+        </button>
+      </aside>
+
+      <section className="glass flex min-h-0 flex-col gap-4 rounded-3xl p-6">
+        <div className="flex items-baseline justify-between">
+          <h2 className="font-display text-2xl font-semibold text-primary">{biome} Equalizer</h2>
+          <span className="text-xs text-muted-foreground">{playing ? "Live spectrum" : "Preview spectrum"}</span>
         </div>
-      </section>
-
-      <section className="mx-auto max-w-6xl px-6 pb-24">
-        <h2 className="font-display text-3xl font-semibold">The Ecological Therapeutic Engine</h2>
-        <div className="mt-8 grid gap-4 md:grid-cols-5">
-          {STAGES.map(([t, d], i) => (
-            <div key={t} className="rounded-3xl border border-border bg-card p-5">
-              <span className="font-display text-sm text-primary">0{i + 1}</span>
-              <h3 className="mt-3 font-display font-semibold">{t}</h3>
-              <p className="mt-2 text-sm text-muted-foreground">{d}</p>
+        <canvas ref={canvas} className="h-[30%] w-full rounded-2xl bg-track/60" />
+        <div className="grid min-h-0 flex-1 grid-cols-4 gap-4">
+          {BIOMES[biome]!.layers.map((L, i) => (
+            <div key={L.name} className="flex min-h-0 flex-col items-center rounded-2xl bg-muted/60 p-4 transition hover:bg-muted">
+              <span className="font-display text-3xl font-semibold text-primary tabular-nums">{lv[i]}</span>
+              <div className="relative my-4 w-3 flex-1 rounded-full bg-track">
+                <div className="bar-fill absolute bottom-0 w-full rounded-full transition-all duration-200" style={{ height: `${lv[i]}%` }} />
+                <div className="absolute left-1/2 h-6 w-6 -translate-x-1/2 translate-y-1/2 rounded-full border-2 border-primary bg-secondary transition-all duration-200" style={{ bottom: `${lv[i]}%`, boxShadow: `0 0 ${lv[i]! / 3}px var(--primary)` }} />
+                <input type="range" min={0} max={100} value={lv[i]} aria-label={L.name}
+                  onChange={(e) => setLevels({ ...levels, [biome]: lv.map((x, j) => (j === i ? +e.target.value : x)) })}
+                  className="absolute left-1/2 top-0 h-full w-10 -translate-x-1/2 cursor-pointer opacity-0 [writing-mode:vertical-lr] [direction:rtl]" />
+              </div>
+              <span className="text-center text-sm">{L.name}</span>
+              <span className="text-[10px] text-muted-foreground">{L.f >= 1000 ? `${L.f / 1000}K` : L.f} Hz</span>
             </div>
           ))}
         </div>
       </section>
 
-      <footer className="border-t border-border py-8 text-center text-sm text-muted-foreground">
-        EchoNature AI — healthcare personalized through ecology.
-      </footer>
-    </main>
+      <aside className="flex flex-col gap-4">
+        <div className="glass rounded-3xl p-5">
+          <p className="text-xs uppercase tracking-widest text-muted-foreground">Biome energy</p>
+          <p className="mt-1 font-display text-5xl font-semibold text-primary">{energy}</p>
+          <div className="mt-3 h-1.5 rounded-full bg-track"><div className="bar-fill h-full rounded-full transition-all" style={{ width: `${energy}%` }} /></div>
+        </div>
+        <div className="glass flex-1 rounded-3xl p-5">
+          <p className="text-xs uppercase tracking-widest text-muted-foreground">Layer mix</p>
+          <ul className="mt-3 space-y-3">
+            {BIOMES[biome]!.layers.map((L, i) => (
+              <li key={L.name}>
+                <div className="flex justify-between text-sm"><span>{L.name}</span><span className="text-muted-foreground">{lv[i]}%</span></div>
+                <div className="mt-1 h-1 rounded-full bg-track"><div className="h-full rounded-full bg-accent transition-all" style={{ width: `${lv[i]}%` }} /></div>
+              </li>
+            ))}
+          </ul>
+        </div>
+        <button onClick={() => setLevels({ ...levels, [biome]: [60, 40, 50, 35] })} className="glass rounded-full px-5 py-3 text-sm text-muted-foreground transition hover:text-foreground">Reset biome</button>
+      </aside>
+    </div>
+  );
+}
+
+function Composer() {
+  const [preset, setPreset] = useState("Calm");
+  const [vals, setVals] = useState(PRESETS["Calm"]!.v);
+  const p = PRESETS[preset]!;
+  const health = Math.round(vals.reduce((a, b) => a + b, 0) / vals.length);
+  return (
+    <div className="glass flex h-full flex-col rounded-[2rem] p-8">
+      <div className="flex flex-wrap items-center justify-between gap-4">
+        <div>
+          <h2 className="font-display text-2xl font-semibold text-primary">Ecosystem Composer</h2>
+          <p className="mt-1 text-sm text-muted-foreground">Nature becomes the dataset. AI becomes the interpreter.</p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          {Object.keys(PRESETS).map((k) => (
+            <button key={k} onClick={() => { setPreset(k); setVals(PRESETS[k]!.v); }}
+              className={`rounded-full px-4 py-1.5 text-sm transition ${k === preset ? "bg-primary text-primary-foreground" : "bg-secondary text-muted-foreground hover:text-foreground"}`}>{k}</button>
+          ))}
+        </div>
+      </div>
+      <div className="mt-6 grid min-h-0 flex-1 grid-cols-[1fr_300px] gap-6">
+        <div className="rounded-3xl bg-muted/60 p-6">
+          <div className="flex h-full items-end justify-between gap-2">
+            {vals.map((v, i) => (
+              <div key={i} className="flex h-full flex-1 flex-col items-center">
+                <div className="relative h-full w-2 rounded-full bg-track">
+                  <div className="bar-fill absolute bottom-0 w-full rounded-full transition-all duration-500" style={{ height: `${v}%` }} />
+                  <div className="absolute left-1/2 h-5 w-5 -translate-x-1/2 translate-y-1/2 rounded-full border-2 border-primary bg-secondary transition-all duration-500" style={{ bottom: `${v}%` }} />
+                  <input type="range" min={0} max={100} value={v} aria-label={BANDS[i]}
+                    onChange={(e) => setVals(vals.map((x, j) => (j === i ? +e.target.value : x)))}
+                    className="absolute left-1/2 top-0 h-full w-8 -translate-x-1/2 cursor-pointer opacity-0 [writing-mode:vertical-lr] [direction:rtl]" />
+                </div>
+                <span className="mt-4 text-xs text-foreground">{BAND_HZ[i]}</span>
+                <span className="text-[10px] text-muted-foreground">{BANDS[i]}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+        <aside className="flex flex-col gap-4">
+          <div className="rounded-3xl bg-muted/60 p-5">
+            <p className="text-xs uppercase tracking-widest text-muted-foreground">{p.goal}</p>
+            <p className="mt-2 font-display text-lg">{p.eco}</p>
+          </div>
+          <div className="rounded-3xl bg-muted/60 p-5">
+            <p className="text-xs uppercase tracking-widest text-muted-foreground">Acoustic Health Index</p>
+            <p className="mt-1 font-display text-4xl font-semibold text-primary">{health}</p>
+          </div>
+          <div className="flex-1 rounded-3xl bg-muted/60 p-5">
+            <p className="text-xs uppercase tracking-widest text-muted-foreground">Why this ecosystem</p>
+            <p className="mt-2 text-sm">{p.why}</p>
+          </div>
+        </aside>
+      </div>
+    </div>
+  );
+}
+
+function Engine() {
+  return (
+    <div className="flex h-full flex-col">
+      <h2 className="font-display text-3xl font-semibold">The Ecological Therapeutic Engine</h2>
+      <p className="mt-2 max-w-2xl text-muted-foreground">Personalized therapeutic soundscapes composed from the acoustic structure of living ecosystems.</p>
+      <div className="mt-8 grid flex-1 grid-cols-5 gap-4">
+        {STAGES.map(([t, d], i) => (
+          <div key={t} className="glass flex flex-col rounded-3xl p-6 transition hover:-translate-y-1">
+            <span className="font-display text-5xl font-light text-primary">0{i + 1}</span>
+            <h3 className="mt-auto font-display text-lg font-semibold">{t}</h3>
+            <p className="mt-2 text-sm text-muted-foreground">{d}</p>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function AboutModal({ onClose }: { onClose: () => void }) {
+  useEffect(() => {
+    const k = (e: KeyboardEvent) => e.key === "Escape" && onClose();
+    window.addEventListener("keydown", k);
+    return () => window.removeEventListener("keydown", k);
+  }, [onClose]);
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/70 backdrop-blur-sm animate-in fade-in" onClick={onClose}>
+      <div role="dialog" aria-modal="true" aria-label="About EchoNature AI" onClick={(e) => e.stopPropagation()}
+        className="glass grid w-[min(960px,90vw)] grid-cols-2 gap-8 rounded-[2rem] p-10 animate-in zoom-in-95">
+        <div>
+          <p className="text-xs uppercase tracking-[0.3em] text-primary">Our goal</p>
+          <h3 className="mt-3 font-display text-2xl font-semibold">Healthcare personalized through ecology</h3>
+          <p className="mt-3 text-sm text-muted-foreground">
+            EchoNature AI is building a bioacoustic foundation model that learns from millions of wildlife recordings. Our mission is to turn the sound of living ecosystems into personalized digital therapeutics — while every listen supports and teaches biodiversity conservation.
+          </p>
+        </div>
+        <div>
+          <p className="text-xs uppercase tracking-[0.3em] text-primary">How it helps</p>
+          <ul className="mt-3 space-y-3 text-sm">
+            <li><b>Calm anxiety & stress</b> — soundscapes tuned to slow, regular natural rhythms.</li>
+            <li><b>Focus & create</b> — pick a biome and shape its layers to mask distractions.</li>
+            <li><b>Sleep better</b> — low, steady textures like whale song and cave hum.</li>
+            <li><b>Learn the species</b> — each session reveals the ecosystems behind the sound.</li>
+            <li><b>Gets more personal</b> — mood and listening feedback refine every next session.</li>
+          </ul>
+        </div>
+        <button onClick={onClose} className="col-span-2 justify-self-end rounded-full bg-primary px-6 py-2 text-sm font-semibold text-primary-foreground glow">Close</button>
+      </div>
+    </div>
   );
 }
