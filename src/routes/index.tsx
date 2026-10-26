@@ -387,18 +387,36 @@ function AddBiomeModal({ taken, onClose, onCreate }: { taken: string[]; onClose:
           className="mt-4 rounded-full border border-input bg-secondary/60 px-5 py-2.5 text-sm outline-none focus:border-primary" />
         {taken.includes(n) && <p className="mt-1 px-2 text-xs text-destructive">That name is already used.</p>}
         <p className="mt-5 text-xs uppercase tracking-widest text-muted-foreground">Pick sounds ({picked.length}/6)</p>
-        <ul className="mt-2 min-h-0 flex-1 space-y-1.5 overflow-y-auto pr-2">
-          {SOUND_LIBRARY.map((s) => {
-            const on = picked.includes(s.name);
-            return (
-              <li key={s.name}>
-                <button onClick={() => toggle(s.name)} className={`flex w-full items-center justify-between rounded-xl px-4 py-2.5 text-left text-sm transition ${on ? "bg-primary text-primary-foreground" : "bg-secondary/50 hover:bg-secondary"}`}>
-                  <span>{s.name}</span><span className="text-xs opacity-70">{on ? "Added" : "+"}</span>
-                </button>
-              </li>
-            );
-          })}
-        </ul>
+        <div className="mt-2 flex min-h-0 flex-1 gap-4">
+          <ul className="min-h-0 flex-1 space-y-1.5 overflow-y-auto pr-2">
+            {SOUND_LIBRARY.map((s) => {
+              const on = picked.includes(s.name);
+              return (
+                <li key={s.name}>
+                  <button onClick={() => toggle(s.name)} className={`flex w-full items-center justify-between rounded-xl px-4 py-2.5 text-left text-sm transition ${on ? "bg-primary text-primary-foreground" : "bg-secondary/50 hover:bg-secondary"}`}>
+                    <span>{s.name}</span><span className="text-xs opacity-70">{on ? "Added" : "+"}</span>
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+          <div className="flex w-60 shrink-0 flex-col rounded-2xl border border-primary/20 bg-secondary/30 p-3">
+            <p className="text-[10px] uppercase tracking-widest text-muted-foreground">Selected ({picked.length}/6)</p>
+            {picked.length === 0 ? (
+              <p className="mt-3 text-xs leading-relaxed text-muted-foreground">Nothing picked yet. Tap sounds on the left and they show up here.</p>
+            ) : (
+              <ul className="mt-2 min-h-0 flex-1 space-y-1.5 overflow-y-auto pr-1">
+                {picked.map((s, i) => (
+                  <li key={s} className="flex items-center justify-between gap-2 rounded-xl bg-primary/15 px-3 py-2 text-xs text-foreground">
+                    <span className="truncate"><span className="mr-1.5 font-semibold text-primary">{i + 1}</span>{s}</span>
+                    <button onClick={() => toggle(s)} aria-label={`Remove ${s}`} className="shrink-0 text-primary transition hover:text-foreground">&times;</button>
+                  </li>
+                ))}
+              </ul>
+            )}
+            <p className="mt-3 text-[10px] leading-relaxed text-muted-foreground">Sounds play in the order listed here.</p>
+          </div>
+        </div>
         <div className="mt-5 flex justify-end gap-2">
           <button onClick={onClose} className="rounded-full px-5 py-2 text-sm text-muted-foreground hover:text-foreground">Cancel</button>
           <button disabled={!valid} onClick={() => onCreate(n, picked.map((s) => SOUND_LIBRARY.find((x) => x.name === s)!))}
