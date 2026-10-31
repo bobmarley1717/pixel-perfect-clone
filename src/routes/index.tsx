@@ -1,6 +1,8 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
-import logo from "@/assets/logo.jpg.asset.json";
+import logo from "@/assets/logo-note.jpg";
+import { composeMusic, sanitizeComposition, type Composition } from "@/lib/compose-music";
+import { supabase, type SavedBiome, type SavedComposition } from "@/lib/supabase";
 
 export const Route = createFileRoute("/")({
   head: () => ({
@@ -80,7 +82,7 @@ const SOUND_LIBRARY: Layer[] = [
 ];
 const DEFAULT_LEVELS = () => Object.fromEntries(BIOME_KEYS.map((b) => [b, [60, 40, 50, 35]]));
 
-type View = "about" | "composer" | "equalizer" | "engine";
+type View = "about" | "composer" | "equalizer" | "music" | "engine";
 
 function Index() {
   const [view, setView] = useState<View>("about");
@@ -89,11 +91,11 @@ function Index() {
     <main className="flex h-screen w-screen flex-col overflow-hidden font-sans">
       <header className="glass z-10 flex w-full shrink-0 items-center justify-between border-b border-border px-8 py-4">
         <div className="flex items-center gap-3">
-          <img src={logo.url} alt="EchoNature AI logo" className="h-10 w-10 rounded-full object-cover" />
+          <img src={logo} alt="EchoNature AI logo" className="h-10 w-10 rounded-full object-cover" />
           <span className="font-display text-lg font-semibold">EchoNature<span className="text-primary"> AI</span></span>
         </div>
         <nav className="flex items-center gap-1 rounded-full bg-secondary/60 p-1">
-          {([["about", "About"], ["composer", "Ecosystem Composer"], ["equalizer", "Biome Equalizer"], ["engine", "Engine"]] as [View, string][]).map(([k, l]) => (
+          {([["about", "About"], ["composer", "Ecosystem Composer"], ["equalizer", "Biome Equalizer"], ["music", "AI Music"], ["engine", "Engine"]] as [View, string][]).map(([k, l]) => (
             <button key={k} onClick={() => setView(k)}
               className={`rounded-full px-4 py-1.5 text-sm transition ${view === k ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"}`}>{l}</button>
           ))}
@@ -105,6 +107,7 @@ function Index() {
         {view === "about" && <About onStart={() => setView("composer")} />}
         {view === "composer" && <Composer />}
         {view === "equalizer" && <BiomeEqualizer />}
+        {view === "music" && <AiMusic />}
         {view === "engine" && <Engine />}
       </div>
 
@@ -121,7 +124,20 @@ function BiomeEqualizer() {
   const [playing, setPlaying] = useState(false);
   const audio = useRef<{ ctx: AudioContext; gains: GainNode[]; analyser: AnalyserNode; srcs: AudioBufferSourceNode[] } | null>(null);
   const canvas = useRef<HTMLCanvasElement>(null);
+  const [saveError, setSaveError] = useState("");
   const lv = levels[biome]!;
+
+  useEffect(() => {
+    supabase?.from("biomes").select("id, name, sounds").order("created_at").then(({ data }) => {
+      const rows = (data ?? []) as SavedBiome[];
+      const loaded = rows
+        .map((r) => [r.name, r.sounds.map((s) => SOUND_LIBRARY.find((x) => x.name === s)).filter((x): x is Layer => !!x)] as const)
+        .filter(([name, layers]) => layers.length > 0 && !BIOMES[name]);
+      if (!loaded.length) return;
+      setBiomes((b) => ({ ...b, ...Object.fromEntries(loaded.map(([name, layers]) => [name, { tag: "Custom biome", layers }])) }));
+      setLevels((l) => ({ ...Object.fromEntries(loaded.map(([name, layers]) => [name, defaults(layers.length)])), ...l }));
+    });
+  }, []);
   const levelsRef = useRef(lv);
   levelsRef.current = lv;
 
@@ -211,6 +227,7 @@ function BiomeEqualizer() {
         ))}
         <button onClick={() => setAdding(true)} className="rounded-2xl border border-dashed border-primary/50 px-4 py-3 text-left text-sm text-primary transition hover:bg-primary/10">+ Add biome</button>
         </div>
+        {saveError && <p className="px-2 text-xs text-destructive">{saveError}</p>}
         <button onClick={() => setPlaying(!playing)} className="mt-2 rounded-full bg-primary px-5 py-3 text-sm font-semibold text-primary-foreground glow transition hover:scale-[1.02]">
           {playing ? "Pause soundscape" : "Play soundscape"}
         </button>
@@ -263,7 +280,313 @@ function BiomeEqualizer() {
         setBiomes({ ...biomes, [name]: { tag: "Custom biome", layers } });
         setLevels({ ...levels, [name]: defaults(layers.length) });
         setBiome(name); setAdding(false);
+        setSaveError("");
+        supabase?.from("biomes").insert({ name, sounds: layers.map((L) => L.name) }).then(({ error }) => {
+          if (error) setSaveError(error.code === "23505" ? `"${name}" is already saved in the cloud by someone else; it is kept on this device only.` : "Couldn't save this biome to the cloud.");
+        });
       }} />}
+    </div>
+  );
+}
+
+const MUSIC_PROMPTS = [
+  "Rainy night in a misty forest, for deep sleep",
+  "Sunrise on a tropical beach, hopeful and bright",
+  "Cozy campfire under winter stars",
+  "Focused study session beside a mountain stream",
+  "Mysterious underwater reef at dusk",
+];
+const SCALE_STEPS: Record<Composition["scale"], number[]> = {
+  "major pentatonic": [0, 2, 4, 7, 9],
+  "minor pentatonic": [0, 3, 5, 7, 10],
+  dorian: [0, 2, 3, 5, 7, 9, 10],
+  lydian: [0, 2, 4, 6, 7, 9, 11],
+  aeolian: [0, 2, 3, 5, 7, 8, 10],
+};
+const KEY_NAMES = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
+const midiHz = (m: number) => 440 * 2 ** ((m - 69) / 12);
+const degreeHz = (c: Composition, d: number) => {
+  const steps = SCALE_STEPS[c.scale];
+  return midiHz(60 + KEY_NAMES.indexOf(c.key) + Math.floor(d / steps.length) * 12 + steps[d % steps.length]!);
+};
+
+// Plays one melody note with a small synth voice per instrument, routed into `out`.
+function playNote(ctx: AudioContext, out: AudioNode, inst: Composition["instrument"], hz: number, t: number, len: number) {
+  const env = ctx.createGain();
+  env.connect(out);
+  const partials: [number, OscillatorType, number][] =
+    inst === "chime" ? [[1, "sine", 1], [2.76, "sine", 0.3]] :
+    inst === "marimba" ? [[1, "sine", 1], [4, "sine", 0.15]] :
+    inst === "flute" ? [[1, "triangle", 1], [2, "sine", 0.1]] :
+    [[1, "sawtooth", 0.6]];
+  const decay = inst === "chime" ? 2.5 : inst === "marimba" ? 0.7 : inst === "pluck" ? 0.6 : len * 1.6;
+  const attack = inst === "flute" ? 0.08 : 0.005;
+  env.gain.setValueAtTime(0, t);
+  env.gain.linearRampToValueAtTime(0.12, t + attack);
+  env.gain.exponentialRampToValueAtTime(0.0001, t + attack + decay);
+  let dest: AudioNode = env;
+  if (inst === "pluck") {
+    const lp = ctx.createBiquadFilter();
+    lp.frequency.setValueAtTime(3000, t);
+    lp.frequency.exponentialRampToValueAtTime(400, t + 0.4);
+    lp.connect(env); dest = lp;
+  }
+  partials.forEach(([ratio, type, amp]) => {
+    const o = ctx.createOscillator(); const g = ctx.createGain();
+    o.type = type; o.frequency.value = hz * ratio; g.gain.value = amp;
+    if (inst === "flute") {
+      const vib = ctx.createOscillator(); const vg = ctx.createGain();
+      vib.frequency.value = 5; vg.gain.value = hz * 0.006;
+      vib.connect(vg).connect(o.frequency); vib.start(t); vib.stop(t + attack + decay);
+    }
+    o.connect(g).connect(dest); o.start(t); o.stop(t + attack + decay + 0.05);
+  });
+}
+
+type MusicEngine = { ctx: AudioContext; analyser: AnalyserNode; layerGains: GainNode[]; timer: number; srcs: AudioScheduledSourceNode[] };
+
+function startMusic(c: Composition, onStep: (i: number) => void): MusicEngine {
+  const ctx = new AudioContext();
+  const analyser = ctx.createAnalyser();
+  analyser.fftSize = 128;
+  analyser.connect(ctx.destination);
+  // Generated impulse response for a soft natural reverb.
+  const ir = ctx.createBuffer(2, ctx.sampleRate * 3, ctx.sampleRate);
+  for (let ch = 0; ch < 2; ch++) {
+    const d = ir.getChannelData(ch);
+    for (let i = 0; i < d.length; i++) d[i] = (Math.random() * 2 - 1) * (1 - i / d.length) ** 3;
+  }
+  const verb = ctx.createConvolver(); verb.buffer = ir;
+  const wet = ctx.createGain(); wet.gain.value = 0.5;
+  verb.connect(wet).connect(analyser);
+  const bus = ctx.createGain();
+  bus.connect(analyser); bus.connect(verb);
+
+  const noise = ctx.createBuffer(1, ctx.sampleRate * 2, ctx.sampleRate);
+  const nd = noise.getChannelData(0);
+  for (let i = 0; i < nd.length; i++) nd[i] = Math.random() * 2 - 1;
+  const srcs: AudioScheduledSourceNode[] = [];
+  const layerGains = c.layers.map((L, i) => {
+    const spec = SOUND_LIBRARY.find((s) => s.name === L.sound)!;
+    const src = ctx.createBufferSource();
+    src.buffer = noise; src.loop = true; src.playbackRate.value = 0.9 + i * 0.07;
+    const f = ctx.createBiquadFilter();
+    f.type = spec.type; f.frequency.value = spec.f; f.Q.value = spec.q;
+    const g = ctx.createGain();
+    const base = (L.level / 100) * 0.3;
+    g.gain.value = base;
+    const lfo = ctx.createOscillator(); const depth = ctx.createGain();
+    lfo.frequency.value = 0.04 + i * 0.03; depth.gain.value = base * L.swell * 0.8;
+    lfo.connect(depth).connect(g.gain);
+    src.connect(f).connect(g).connect(bus);
+    src.start(); lfo.start(); srcs.push(src, lfo);
+    return g;
+  });
+
+  const pad = ctx.createBiquadFilter(); pad.type = "lowpass"; pad.frequency.value = 900;
+  const padGain = ctx.createGain(); padGain.gain.value = (c.drone / 100) * 0.06;
+  pad.connect(padGain).connect(bus);
+  const root = midiHz(48 + KEY_NAMES.indexOf(c.key));
+  [root, root * 1.5, root * 2.003].forEach((hz) => {
+    const o = ctx.createOscillator(); o.type = "triangle"; o.frequency.value = hz;
+    o.connect(pad); o.start(); srcs.push(o);
+  });
+
+  const step = 60 / c.bpm / 2;
+  let next = ctx.currentTime + 0.1; let i = 0;
+  const timer = window.setInterval(() => {
+    while (next < ctx.currentTime + 0.2) {
+      const d = c.melody[i % c.melody.length];
+      if (d != null) playNote(ctx, bus, c.instrument, degreeHz(c, d), next, step);
+      const idx = i % c.melody.length;
+      window.setTimeout(() => onStep(idx), Math.max(0, (next - ctx.currentTime) * 1000));
+      next += step; i++;
+    }
+  }, 25);
+  return { ctx, analyser, layerGains, timer, srcs };
+}
+
+function AiMusic() {
+  const [prompt, setPrompt] = useState(MUSIC_PROMPTS[0]!);
+  const [song, setSong] = useState<Composition | null>(null);
+  const [levels, setLevels] = useState<number[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [playing, setPlaying] = useState(false);
+  const [beat, setBeat] = useState(-1);
+  const [library, setLibrary] = useState<SavedComposition[]>([]);
+  const [saved, setSaved] = useState<"idle" | "saving" | "saved">("idle");
+  const engine = useRef<MusicEngine | null>(null);
+  const lastPrompt = useRef("");
+
+  const loadLibrary = () =>
+    supabase?.from("compositions").select("id, created_at, prompt, title, composition").order("created_at", { ascending: false }).limit(30)
+      .then(({ data }) => setLibrary((data ?? []) as SavedComposition[]));
+  useEffect(() => { loadLibrary(); }, []);
+
+  const save = async () => {
+    if (!supabase || !song) return;
+    setSaved("saving"); setError("");
+    const { error } = await supabase.from("compositions").insert({ prompt: lastPrompt.current, title: song.title, composition: song });
+    if (error) { setSaved("idle"); setError("Couldn't save to the cloud library."); return; }
+    setSaved("saved"); loadLibrary();
+  };
+  const open = (row: SavedComposition) => {
+    const c = sanitizeComposition(row.composition as Partial<Record<keyof Composition, unknown>>, SOUND_LIBRARY.map((s) => s.name));
+    setSong(c); setLevels(c.layers.map((l) => l.level)); setSaved("saved"); play(c);
+  };
+  const canvas = useRef<HTMLCanvasElement>(null);
+
+  const stop = () => {
+    const e = engine.current; if (!e) return;
+    window.clearInterval(e.timer);
+    e.srcs.forEach((s) => { try { s.stop(); } catch { /* already stopped */ } });
+    e.ctx.close();
+    engine.current = null; setBeat(-1);
+  };
+  const play = (c: Composition) => { stop(); engine.current = startMusic(c, setBeat); setPlaying(true); };
+
+  useEffect(() => stop, []);
+  useEffect(() => {
+    const e = engine.current; if (!e || !song) return;
+    e.layerGains.forEach((g, i) => g.gain.setTargetAtTime(((levels[i] ?? 0) / 100) * 0.3, e.ctx.currentTime, 0.1));
+  }, [levels]);
+
+  const generate = async () => {
+    setLoading(true); setError("");
+    try {
+      const c = await composeMusic({ data: { prompt, sounds: SOUND_LIBRARY.map((s) => s.name) } });
+      lastPrompt.current = prompt; setSaved("idle");
+      setSong(c); setLevels(c.layers.map((l) => l.level)); play(c);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Something went wrong composing your music.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    let raf = 0; let t = 0;
+    const draw = () => {
+      const c = canvas.current; if (!c) return;
+      const g = c.getContext("2d")!;
+      const w = (c.width = c.clientWidth), h = (c.height = c.clientHeight);
+      let data: number[];
+      if (engine.current) {
+        const arr = new Uint8Array(engine.current.analyser.frequencyBinCount);
+        engine.current.analyser.getByteFrequencyData(arr);
+        data = Array.from(arr, (x) => x / 255);
+      } else {
+        t += 0.02;
+        data = Array.from({ length: 64 }, (_, i) => 0.15 + 0.1 * Math.sin(t + i * 0.4));
+      }
+      const col = getComputedStyle(document.documentElement).getPropertyValue("--primary").trim();
+      const bw = w / data.length;
+      data.forEach((v, i) => {
+        const bh = Math.max(4, v * h * 0.9);
+        g.fillStyle = col; g.globalAlpha = 0.35 + v * 0.65;
+        g.beginPath(); g.roundRect(i * bw + 2, h - bh, bw - 4, bh, 4); g.fill();
+      });
+      raf = requestAnimationFrame(draw);
+    };
+    raf = requestAnimationFrame(draw);
+    return () => cancelAnimationFrame(raf);
+  }, []);
+
+  return (
+    <div className="grid h-full grid-cols-[300px_1fr_280px] gap-6">
+      <aside className="glass flex flex-col gap-3 rounded-3xl p-5">
+        <p className="text-xs uppercase tracking-widest text-muted-foreground">Describe your music</p>
+        <textarea value={prompt} onChange={(e) => setPrompt(e.target.value)} maxLength={500} rows={4}
+          className="resize-none rounded-2xl border border-input bg-secondary/60 p-4 text-sm outline-none focus:border-primary" />
+        <div className="flex min-h-0 flex-1 flex-col gap-1.5 overflow-y-auto pr-1">
+          {MUSIC_PROMPTS.map((p) => (
+            <button key={p} onClick={() => setPrompt(p)}
+              className={`rounded-xl px-3 py-2 text-left text-xs transition ${p === prompt ? "bg-primary/20 text-foreground" : "bg-secondary/50 text-muted-foreground hover:bg-secondary hover:text-foreground"}`}>{p}</button>
+          ))}
+        </div>
+        {error && <p className="text-xs text-destructive">{error}</p>}
+        <button onClick={generate} disabled={loading || !prompt.trim()}
+          className="rounded-full bg-primary px-5 py-3 text-sm font-semibold text-primary-foreground glow transition hover:scale-[1.02] disabled:opacity-50">
+          {loading ? "Composing…" : "Generate music"}
+        </button>
+      </aside>
+
+      <section className="glass flex min-h-0 flex-col gap-4 rounded-3xl p-6">
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <h2 className="font-display text-2xl font-semibold text-primary">{song?.title ?? "AI Music Generator"}</h2>
+            <p className="mt-1 max-w-xl text-sm text-muted-foreground">{song?.description ?? "Describe a place or a feeling. The AI composes a melody and arranges nature sounds around it."}</p>
+          </div>
+          {song && (
+            <div className="flex shrink-0 gap-2">
+              {supabase && (
+                <button onClick={save} disabled={saved !== "idle"}
+                  className="rounded-full border border-primary/50 px-5 py-2 text-sm text-primary transition hover:bg-primary/10 disabled:opacity-60">
+                  {saved === "saved" ? "Saved" : saved === "saving" ? "Saving…" : "Save"}
+                </button>
+              )}
+              <button onClick={() => (playing ? (stop(), setPlaying(false)) : play(song))}
+                className="rounded-full bg-primary px-5 py-2 text-sm font-semibold text-primary-foreground glow">{playing ? "Pause" : "Play"}</button>
+            </div>
+          )}
+        </div>
+        <canvas ref={canvas} className="min-h-0 w-full flex-1 rounded-2xl bg-track/60" />
+        {song && (
+          <div>
+            <p className="mb-2 text-xs uppercase tracking-widest text-muted-foreground">Melody · {song.instrument}</p>
+            <div className="grid gap-1" style={{ gridTemplateColumns: `repeat(${song.melody.length}, minmax(0, 1fr))` }}>
+              {song.melody.map((d, i) => (
+                <div key={i} className="relative h-16 rounded bg-muted/60">
+                  {d != null && (
+                    <div className={`absolute inset-x-0 h-1.5 rounded-full transition ${i === beat ? "bg-foreground" : "bg-primary"}`} style={{ bottom: `${(d / 14) * 85}%` }} />
+                  )}
+                  {i === beat && <div className="absolute inset-0 rounded bg-primary/20" />}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </section>
+
+      <aside className="flex flex-col gap-4">
+        <div className="glass grid grid-cols-2 gap-3 rounded-3xl p-5 text-center">
+          {([["Tempo", song ? `${song.bpm} BPM` : "–"], ["Key", song?.key ?? "–"], ["Scale", song?.scale ?? "–"]] as const).map(([k, v]) => (
+            <div key={k} className={k === "Scale" ? "col-span-2" : ""}>
+              <p className="text-[10px] uppercase tracking-widest text-muted-foreground">{k}</p>
+              <p className="mt-1 font-display text-lg font-semibold capitalize text-primary">{v}</p>
+            </div>
+          ))}
+        </div>
+        {supabase && (
+          <div className="glass flex max-h-[40%] min-h-0 flex-col rounded-3xl p-5">
+            <p className="text-xs uppercase tracking-widest text-muted-foreground">Saved library</p>
+            {library.length === 0 && <p className="mt-3 text-sm text-muted-foreground">Nothing saved yet.</p>}
+            <ul className="mt-2 min-h-0 flex-1 space-y-1.5 overflow-y-auto pr-1">
+              {library.map((row) => (
+                <li key={row.id}>
+                  <button onClick={() => open(row)} title={row.prompt}
+                    className="w-full truncate rounded-xl bg-secondary/50 px-3 py-2 text-left text-xs transition hover:bg-secondary">{row.title}</button>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+        <div className="glass min-h-0 flex-1 overflow-y-auto rounded-3xl p-5">
+          <p className="text-xs uppercase tracking-widest text-muted-foreground">Nature layers</p>
+          {!song && <p className="mt-3 text-sm text-muted-foreground">Generate a piece to see which sounds the AI picked.</p>}
+          <ul className="mt-3 space-y-4">
+            {song?.layers.map((L, i) => (
+              <li key={L.sound}>
+                <div className="flex justify-between text-sm"><span>{L.sound}</span><span className="text-muted-foreground">{levels[i]}%</span></div>
+                <input type="range" min={0} max={100} value={levels[i] ?? 0} aria-label={L.sound}
+                  onChange={(e) => setLevels(levels.map((x, j) => (j === i ? +e.target.value : x)))}
+                  className="mt-1 w-full accent-[var(--primary)]" />
+              </li>
+            ))}
+          </ul>
+        </div>
+      </aside>
     </div>
   );
 }
