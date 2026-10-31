@@ -275,7 +275,7 @@ function Composer() {
   const health = Math.round(vals.reduce((a, b) => a + b, 0) / vals.length);
   return (
     <div className="flex h-full items-center justify-center">
-      <div className="glass flex w-full flex-col rounded-[2rem] p-7">
+      <div className="glass flex w-full max-w-5xl flex-col rounded-[2rem] p-8">
         <div className="flex flex-wrap items-center justify-between gap-4">
           <div>
             <h2 className="font-display text-2xl font-semibold text-primary">Ecosystem Composer</h2>
