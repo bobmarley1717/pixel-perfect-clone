@@ -274,54 +274,57 @@ function Composer() {
   const p = PRESETS[preset]!;
   const health = Math.round(vals.reduce((a, b) => a + b, 0) / vals.length);
   return (
-    <div className="glass flex h-full flex-col rounded-[2rem] p-8">
-      <div className="flex flex-wrap items-center justify-between gap-4">
-        <div>
-          <h2 className="font-display text-2xl font-semibold text-primary">Ecosystem Composer</h2>
-          <p className="mt-1 text-sm text-muted-foreground">Nature becomes the dataset. AI becomes the interpreter.</p>
-        </div>
-        <div className="flex flex-wrap gap-2">
-          {Object.keys(PRESETS).map((k) => (
-            <button key={k} onClick={() => { setPreset(k); setVals(PRESETS[k]!.v); }}
-              className={`rounded-full px-4 py-1.5 text-sm transition ${k === preset ? "bg-primary text-primary-foreground" : "bg-secondary text-muted-foreground hover:text-foreground"}`}>{k}</button>
-          ))}
-        </div>
-      </div>
-      <div className="mt-6 grid min-h-0 flex-1 grid-cols-[1fr_300px] gap-6">
-        <div className="rounded-3xl bg-muted/60 p-6">
-          <div className="flex h-full items-end justify-between gap-2">
-            {vals.map((v, i) => (
-              <div key={i} className="flex h-full flex-1 flex-col items-center">
-                <div className="relative h-full w-2 rounded-full bg-track">
-                  <div className="bar-fill absolute bottom-0 w-full rounded-full transition-all duration-500" style={{ height: `${v}%` }} />
-                  <div className="absolute left-1/2 h-5 w-5 -translate-x-1/2 translate-y-1/2 rounded-full border-2 border-primary bg-secondary transition-all duration-500" style={{ bottom: `${v}%` }} />
-                  <input type="range" min={0} max={100} value={v} aria-label={BANDS[i]}
-                    onChange={(e) => setVals(vals.map((x, j) => (j === i ? +e.target.value : x)))}
-                    className="absolute left-1/2 top-0 h-full w-8 -translate-x-1/2 cursor-pointer opacity-0 [writing-mode:vertical-lr] [direction:rtl]" />
-                </div>
-                <span className="mt-4 text-xs text-foreground">{BAND_HZ[i]}</span>
-                <span className="text-[10px] text-muted-foreground">{BANDS[i]}</span>
-              </div>
+    <div className="flex h-full items-center justify-center">
+      <div className="glass flex w-full flex-col rounded-[2rem] p-7">
+        <div className="flex flex-wrap items-center justify-between gap-4">
+          <div>
+            <h2 className="font-display text-2xl font-semibold text-primary">Ecosystem Composer</h2>
+            <p className="mt-1 text-sm text-muted-foreground">Nature becomes the dataset. AI becomes the interpreter.</p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {Object.keys(PRESETS).map((k) => (
+              <button key={k} onClick={() => { setPreset(k); setVals(PRESETS[k]!.v); }}
+                className={`rounded-full px-4 py-1.5 text-sm transition ${k === preset ? "bg-primary text-primary-foreground" : "bg-secondary text-muted-foreground hover:text-foreground"}`}>{k}</button>
             ))}
           </div>
         </div>
-        <aside className="flex flex-col gap-4">
+        <div className="mt-5 grid grid-cols-[1fr_300px] items-start gap-6">
           <div className="rounded-3xl bg-muted/60 p-5">
-            <p className="text-xs uppercase tracking-widest text-muted-foreground">{p.goal}</p>
-            <p className="mt-2 font-display text-lg">{p.eco}</p>
+            <div className="flex h-60 items-end justify-between gap-2">
+              {vals.map((v, i) => (
+                <div key={i} className="flex h-full flex-1 flex-col items-center">
+                  <div className="relative h-full w-2 rounded-full bg-track">
+                    <div className="bar-fill absolute bottom-0 w-full rounded-full transition-all duration-500" style={{ height: `${v}%` }} />
+                    <div className="absolute left-1/2 h-5 w-5 -translate-x-1/2 translate-y-1/2 rounded-full border-2 border-primary bg-secondary transition-all duration-500" style={{ bottom: `${v}%` }} />
+                    <input type="range" min={0} max={100} value={v} aria-label={BANDS[i]}
+                      onChange={(e) => setVals(vals.map((x, j) => (j === i ? +e.target.value : x)))}
+                      className="absolute left-1/2 top-0 h-full w-8 -translate-x-1/2 cursor-pointer opacity-0 [writing-mode:vertical-lr] [direction:rtl]" />
+                  </div>
+                  <span className="mt-3 text-xs text-foreground">{BAND_HZ[i]}</span>
+                  <span className="text-[10px] text-muted-foreground">{BANDS[i]}</span>
+                </div>
+              ))}
+            </div>
           </div>
-          <div className="rounded-3xl bg-muted/60 p-5">
-            <p className="text-xs uppercase tracking-widest text-muted-foreground">Acoustic Health Index</p>
-            <p className="mt-1 font-display text-4xl font-semibold text-primary">{health}</p>
-          </div>
-          <div className="flex-1 rounded-3xl bg-muted/60 p-5">
-            <p className="text-xs uppercase tracking-widest text-muted-foreground">Why this ecosystem</p>
-            <p className="mt-2 text-sm">{p.why}</p>
-          </div>
-        </aside>
+          <aside className="flex flex-col gap-3">
+            <div className="rounded-3xl bg-muted/60 p-5">
+              <p className="text-xs uppercase tracking-widest text-muted-foreground">{p.goal}</p>
+              <p className="mt-2 font-display text-lg">{p.eco}</p>
+            </div>
+            <div className="rounded-3xl bg-muted/60 p-5">
+              <p className="text-xs uppercase tracking-widest text-muted-foreground">Acoustic Health Index</p>
+              <p className="mt-1 font-display text-4xl font-semibold text-primary">{health}</p>
+            </div>
+            <div className="rounded-3xl bg-muted/60 p-5">
+              <p className="text-xs uppercase tracking-widest text-muted-foreground">Why this ecosystem</p>
+              <p className="mt-2 text-sm">{p.why}</p>
+            </div>
+          </aside>
+        </div>
       </div>
     </div>
   );
+
 }
 
 function Engine() {
