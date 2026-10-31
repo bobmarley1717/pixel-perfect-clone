@@ -290,7 +290,7 @@ function Composer() {
         </div>
         <div className="mt-5 grid grid-cols-[1fr_300px] items-start gap-6">
           <div className="rounded-3xl bg-muted/60 p-5">
-            <div className="flex h-60 items-end justify-between gap-2">
+            <div className="flex h-72 items-end justify-between gap-2">
               {vals.map((v, i) => (
                 <div key={i} className="flex h-full flex-1 flex-col items-center">
                   <div className="relative h-full w-2 rounded-full bg-track">
