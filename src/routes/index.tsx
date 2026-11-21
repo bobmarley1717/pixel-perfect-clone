@@ -1,7 +1,8 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import logo from "@/assets/logo-note.jpg";
-import { composeMusic, sanitizeComposition, type Composition } from "@/lib/compose-music";
+import { composeMusic, INSTRUMENTS, KEYS, SCALES, sanitizeComposition, type Composition } from "@/lib/compose-music";
+import type { User } from "@supabase/supabase-js";
 import { supabase, type SavedBiome, type SavedComposition } from "@/lib/supabase";
 
 export const Route = createFileRoute("/")({
@@ -17,17 +18,6 @@ export const Route = createFileRoute("/")({
   }),
   component: Index,
 });
-
-const BANDS = ["Whale", "Frog", "Wind", "Rain", "Insect", "Canopy", "Thrush", "Wren", "Cicada", "Bat"];
-const BAND_HZ = ["32", "64", "125", "250", "500", "1K", "2K", "4K", "8K", "16K"];
-
-const PRESETS = {
-  Calm: { goal: "High anxiety", eco: "Coastal mangrove dawn chorus", v: [40, 55, 70, 62, 48, 35, 58, 44, 30, 20], why: "Rhythmic regularity and soft spectral balance in the low-mids." },
-  Create: { goal: "Creative work", eco: "Amazon rainforest canopy", v: [30, 45, 50, 60, 72, 80, 90, 85, 70, 55], why: "High vocal diversity and acoustic richness in upper bands." },
-  Focus: { goal: "Deep focus", eco: "Arctic tundra windscape", v: [55, 60, 75, 70, 50, 30, 22, 18, 14, 10], why: "Low temporal complexity and steady broadband wind texture." },
-  Sleep: { goal: "Sleep", eco: "Humpback whale communication", v: [90, 82, 64, 45, 30, 20, 14, 10, 8, 5], why: "Slow frequency modulation and dominant sub-bass contours." },
-  Regulate: { goal: "Emotional regulation", eco: "Temperate forest after rainfall", v: [35, 48, 62, 74, 66, 55, 60, 48, 36, 26], why: "Even harmonic spacing with gentle droplet transients." },
-} as Record<string, { goal: string; eco: string; v: number[]; why: string }>;
 
 const STAGES = [
   ["Global Bioacoustic Intelligence", "Millions of recordings from Macaulay Library, Xeno-Canto, NOAA and Rainforest Connection."],
@@ -80,35 +70,84 @@ const SOUND_LIBRARY: Layer[] = [
   { name: "Reef fish", f: 900, q: 6, type: "bandpass" },
   { name: "Coral snaps", f: 3000, q: 8, type: "bandpass" },
 ];
-const DEFAULT_LEVELS = () => Object.fromEntries(BIOME_KEYS.map((b) => [b, [60, 40, 50, 35]]));
+// Rain as individual droplets: short, decaying ticks at random pitches over a faint wash, instead of steady white noise.
+function rainBuffer(ctx: BaseAudioContext) {
+  const sr = ctx.sampleRate;
+  const buf = ctx.createBuffer(1, sr * 4, sr);
+  const d = buf.getChannelData(0);
+  for (let i = 0; i < d.length; i++) d[i] = (Math.random() * 2 - 1) * 0.06;
+  const drops = 4 * 70;
+  for (let k = 0; k < drops; k++) {
+    const at = Math.floor(Math.random() * d.length);
+    const hz = 1800 + Math.random() * 4500;
+    const len = Math.floor(sr * (0.004 + Math.random() * 0.018));
+    const amp = 0.4 + Math.random() * 1.4;
+    for (let j = 0; j < len; j++) {
+      const env = Math.exp((-6 * j) / len);
+      d[(at + j) % d.length]! += amp * env * (0.6 * Math.sin((2 * Math.PI * hz * j) / sr) + 0.4 * (Math.random() * 2 - 1));
+    }
+  }
+  return buf;
+}
+// The source buffer a layer plays: its own texture if it has one, otherwise the shared filtered noise.
+const layerBuffer = (ctx: BaseAudioContext, name: string, noise: AudioBuffer) => (name === "Canopy rainfall" ? rainBuffer(ctx) : noise);
 
-type View = "about" | "composer" | "equalizer" | "music" | "engine";
+const DEFAULT_LEVELS = () => Object.fromEntries(BIOME_KEYS.map((b) => [b, [50, 50, 50, 50]]));
+// Gain per slider step (half the old 0.35/100); 50 is the normal listening level.
+const EQ_GAIN_PER_STEP = 0.35 / 100 / 2;
+
+type View = "about" | "equalizer" | "music" | "signin";
 
 function Index() {
   const [view, setView] = useState<View>("about");
+  const [user, setUser] = useState<User | null>(null);
+  const [recovering, setRecovering] = useState(false);
+
+  useEffect(() => {
+    if (!supabase) return;
+    supabase.auth.getSession().then(({ data }) => setUser(data.session?.user ?? null));
+    const { data } = supabase.auth.onAuthStateChange((event, session) => {
+      setUser(session?.user ?? null);
+      // Arriving from a password-reset email: ask for the new password.
+      if (event === "PASSWORD_RECOVERY") { setRecovering(true); setView("signin"); }
+    });
+    return () => data.subscription.unsubscribe();
+  }, []);
 
   return (
     <main className="flex h-screen w-screen flex-col overflow-hidden font-sans">
       <header className="glass z-10 flex w-full shrink-0 items-center justify-between border-b border-border px-8 py-4">
         <div className="flex items-center gap-3">
           <img src={logo} alt="EchoNature AI logo" className="h-10 w-10 rounded-full object-cover" />
-          <span className="font-display text-lg font-semibold">EchoNature<span className="text-primary"> AI</span></span>
+          <div className="leading-tight">
+            <span className="block font-display text-lg font-semibold">EchoNature<span className="text-primary"> AI</span></span>
+            <span className="hidden text-[10px] uppercase tracking-[0.3em] text-primary xl:block">Bioacoustic foundation model</span>
+          </div>
         </div>
-        <nav className="flex items-center gap-1 rounded-full bg-secondary/60 p-1">
-          {([["about", "About"], ["composer", "Ecosystem Composer"], ["equalizer", "Biome Equalizer"], ["music", "AI Music"], ["engine", "Engine"]] as [View, string][]).map(([k, l]) => (
-            <button key={k} onClick={() => setView(k)}
-              className={`rounded-full px-4 py-1.5 text-sm transition ${view === k ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"}`}>{l}</button>
-          ))}
-        </nav>
-        <p className="hidden text-xs uppercase tracking-[0.3em] text-primary xl:block">Bioacoustic foundation model</p>
+        <div className="flex items-center gap-3">
+          <nav className="flex items-center gap-1 rounded-full bg-secondary/60 p-1">
+            {([["about", "About"], ["music", "AI Ambience"], ["equalizer", "Biome Equalizer"]] as [View, string][]).map(([k, l]) => (
+              <button key={k} onClick={() => setView(k)}
+                className={`rounded-full px-4 py-1.5 text-sm transition ${view === k ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"}`}>{l}</button>
+            ))}
+          </nav>
+          {user ? (
+            <div className="flex items-center gap-3">
+              <span className="max-w-48 truncate text-sm text-muted-foreground">{user.email}</span>
+              <button onClick={() => supabase?.auth.signOut()} className="rounded-full border border-primary/50 px-4 py-1.5 text-sm text-primary transition hover:bg-primary/10">Sign out</button>
+            </div>
+          ) : (
+            <button onClick={() => setView("signin")}
+              className={`rounded-full px-4 py-1.5 text-sm font-semibold transition ${view === "signin" ? "bg-primary/20 text-primary" : "bg-primary text-primary-foreground glow"}`}>Sign in</button>
+          )}
+        </div>
       </header>
 
       <div className="min-h-0 flex-1 p-6">
-        {view === "about" && <About onStart={() => setView("composer")} />}
-        {view === "composer" && <Composer />}
+        {view === "about" && <About onGo={setView} />}
         {view === "equalizer" && <BiomeEqualizer />}
         {view === "music" && <AiMusic />}
-        {view === "engine" && <Engine />}
+        {view === "signin" && <SignIn recovering={recovering} onDone={() => { setRecovering(false); setView("music"); }} />}
       </div>
 
     </main>
@@ -160,12 +199,12 @@ function BiomeEqualizer() {
     const srcs: AudioBufferSourceNode[] = [];
     biomes[b]!.layers.forEach((L, i) => {
       const src = ctx.createBufferSource();
-      src.buffer = buf; src.loop = true;
+      src.buffer = layerBuffer(ctx, L.name, buf); src.loop = true;
       src.playbackRate.value = 0.9 + i * 0.07;
       const f = ctx.createBiquadFilter();
       f.type = L.type; f.frequency.value = L.f; f.Q.value = L.q;
       const g = ctx.createGain();
-      g.gain.value = (levelsRef.current[i]! / 100) * 0.35;
+      g.gain.value = levelsRef.current[i]! * EQ_GAIN_PER_STEP;
       src.connect(f).connect(g).connect(analyser);
       src.start();
       gains.push(g); srcs.push(src);
@@ -175,7 +214,7 @@ function BiomeEqualizer() {
 
   useEffect(() => { if (playing) start(biome); return stop; }, [playing, biome]);
   useEffect(() => {
-    audio.current?.gains.forEach((g, i) => g.gain.setTargetAtTime((lv[i]! / 100) * 0.35, audio.current!.ctx.currentTime, 0.1));
+    audio.current?.gains.forEach((g, i) => g.gain.setTargetAtTime(lv[i]! * EQ_GAIN_PER_STEP, audio.current!.ctx.currentTime, 0.1));
   }, [lv]);
 
   useEffect(() => {
@@ -274,7 +313,7 @@ function BiomeEqualizer() {
             ))}
           </ul>
         </div>
-        <button onClick={() => setLevels({ ...levels, [biome]: BIOMES[biome] ? [60, 40, 50, 35] : defaults(lv.length) })} className="glass rounded-full px-5 py-3 text-sm text-muted-foreground transition hover:text-foreground">Reset biome</button>
+        <button onClick={() => setLevels({ ...levels, [biome]: defaults(lv.length) })} className="glass rounded-full px-5 py-3 text-sm text-muted-foreground transition hover:text-foreground">Reset biome</button>
       </aside>
       {adding && <AddBiomeModal taken={Object.keys(biomes)} onClose={() => setAdding(false)} onCreate={(name, layers) => {
         setBiomes({ ...biomes, [name]: { tag: "Custom biome", layers } });
@@ -305,9 +344,14 @@ const SCALE_STEPS: Record<Composition["scale"], number[]> = {
 };
 const KEY_NAMES = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
 const midiHz = (m: number) => 440 * 2 ** ((m - 69) / 12);
-const degreeHz = (c: Composition, d: number) => {
+const degreeMidi = (c: Pick<Composition, "key" | "scale">, d: number) => {
   const steps = SCALE_STEPS[c.scale];
-  return midiHz(60 + KEY_NAMES.indexOf(c.key) + Math.floor(d / steps.length) * 12 + steps[d % steps.length]!);
+  return 60 + KEY_NAMES.indexOf(c.key) + Math.floor(d / steps.length) * 12 + steps[d % steps.length]!;
+};
+const degreeHz = (c: Composition, d: number) => midiHz(degreeMidi(c, d));
+const degreeName = (c: Pick<Composition, "key" | "scale">, d: number) => {
+  const m = degreeMidi(c, d);
+  return `${KEY_NAMES[m % 12]}${Math.floor(m / 12) - 1}`;
 };
 
 // Plays one melody note with a small synth voice per instrument, routed into `out`.
@@ -369,7 +413,7 @@ function startMusic(c: Composition, onStep: (i: number) => void): MusicEngine {
   const layerGains = c.layers.map((L, i) => {
     const spec = SOUND_LIBRARY.find((s) => s.name === L.sound)!;
     const src = ctx.createBufferSource();
-    src.buffer = noise; src.loop = true; src.playbackRate.value = 0.9 + i * 0.07;
+    src.buffer = layerBuffer(ctx, L.sound, noise); src.loop = true; src.playbackRate.value = 0.9 + i * 0.07;
     const f = ctx.createBiquadFilter();
     f.type = spec.type; f.frequency.value = spec.f; f.Q.value = spec.q;
     const g = ctx.createGain();
@@ -406,6 +450,22 @@ function startMusic(c: Composition, onStep: (i: number) => void): MusicEngine {
   return { ctx, analyser, layerGains, timer, srcs };
 }
 
+const SMALL_WORDS = new Set(["a", "an", "and", "at", "by", "for", "in", "of", "on", "or", "the", "to", "with"]);
+// "misty forest slumber" -> "Misty Forest Slumber"; small words stay lowercase unless first or last.
+const titleCase = (s: string) => {
+  const words = s.trim().replace(/^["'“”]+|["'“”.]+$/g, "").split(/\s+/);
+  return words.map((w, i) => {
+    if (w.length > 1 && w === w.toUpperCase() && /[A-Z]/.test(w)) return w;
+    const lw = w.toLowerCase();
+    return i > 0 && i < words.length - 1 && SMALL_WORDS.has(lw) ? lw : lw.charAt(0).toUpperCase() + lw.slice(1);
+  }).join(" ");
+};
+const sentenceCase = (s: string) => {
+  const t = s.trim();
+  const c = t.charAt(0).toUpperCase() + t.slice(1);
+  return /[.!?]$/.test(c) ? c : `${c}.`;
+};
+
 function AiMusic() {
   const [prompt, setPrompt] = useState(MUSIC_PROMPTS[0]!);
   const [song, setSong] = useState<Composition | null>(null);
@@ -416,11 +476,14 @@ function AiMusic() {
   const [beat, setBeat] = useState(-1);
   const [library, setLibrary] = useState<SavedComposition[]>([]);
   const [saved, setSaved] = useState<"idle" | "saving" | "saved">("idle");
+  const [showSaved, setShowSaved] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [openId, setOpenId] = useState<string | null>(null);
   const engine = useRef<MusicEngine | null>(null);
   const lastPrompt = useRef("");
 
   const loadLibrary = () =>
-    supabase?.from("compositions").select("id, created_at, prompt, title, composition").order("created_at", { ascending: false }).limit(30)
+    supabase?.from("compositions").select("id, created_at, prompt, title, composition").order("created_at", { ascending: false })
       .then(({ data }) => setLibrary((data ?? []) as SavedComposition[]));
   useEffect(() => { loadLibrary(); }, []);
 
@@ -428,12 +491,19 @@ function AiMusic() {
     if (!supabase || !song) return;
     setSaved("saving"); setError("");
     const { error } = await supabase.from("compositions").insert({ prompt: lastPrompt.current, title: song.title, composition: song });
-    if (error) { setSaved("idle"); setError("Couldn't save to the cloud library."); return; }
+    if (error) {
+      setSaved("idle");
+      console.error("Saving composition failed", error);
+      setError(/fetch|network/i.test(error.message)
+        ? "Couldn't reach the cloud library. Check your connection, or that the Supabase project is running."
+        : `Couldn't save to the cloud library: ${error.message}`);
+      return;
+    }
     setSaved("saved"); loadLibrary();
   };
   const open = (row: SavedComposition) => {
     const c = sanitizeComposition(row.composition as Partial<Record<keyof Composition, unknown>>, SOUND_LIBRARY.map((s) => s.name));
-    setSong(c); setLevels(c.layers.map((l) => l.level)); setSaved("saved"); play(c);
+    setSong(c); setLevels(c.layers.map((l) => l.level)); setSaved("saved"); setOpenId(row.id); play(c);
   };
   const canvas = useRef<HTMLCanvasElement>(null);
 
@@ -456,7 +526,7 @@ function AiMusic() {
     setLoading(true); setError("");
     try {
       const c = await composeMusic({ data: { prompt, sounds: SOUND_LIBRARY.map((s) => s.name) } });
-      lastPrompt.current = prompt; setSaved("idle");
+      lastPrompt.current = prompt; setSaved("idle"); setOpenId(null);
       setSong(c); setLevels(c.layers.map((l) => l.level)); play(c);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Something went wrong composing your music.");
@@ -513,13 +583,18 @@ function AiMusic() {
       </aside>
 
       <section className="glass flex min-h-0 flex-col gap-4 rounded-3xl p-6">
-        <div className="flex items-start justify-between gap-4">
-          <div>
-            <h2 className="font-display text-2xl font-semibold text-primary">{song?.title ?? "AI Music Generator"}</h2>
-            <p className="mt-1 max-w-xl text-sm text-muted-foreground">{song?.description ?? "Describe a place or a feeling. The AI composes a melody and arranges nature sounds around it."}</p>
+        <div className="flex items-start justify-between gap-6">
+          <div className="min-w-0">
+            <p className="text-[10px] uppercase tracking-[0.3em] text-muted-foreground">{song ? (playing ? "Now playing" : "Your track") : "AI Ambience"}</p>
+            <h2 className="mt-1 font-display text-3xl font-semibold leading-tight text-primary">{song ? titleCase(song.title) : "Compose an Ambience"}</h2>
+            <p className="mt-3 max-w-xl border-l-2 border-primary/50 pl-4 text-sm italic leading-relaxed text-muted-foreground">
+              {song?.description ? sentenceCase(song.description) : "Describe a place or a feeling. The AI composes a melody and arranges nature sounds around it."}
+            </p>
           </div>
           {song && (
-            <div className="flex shrink-0 gap-2">
+            <div className="flex w-28 shrink-0 flex-col gap-2">
+              <button onClick={() => setEditing(true)}
+                className="rounded-full border border-primary/50 px-5 py-2 text-sm text-primary transition hover:bg-primary/10">Edit</button>
               {supabase && (
                 <button onClick={save} disabled={saved !== "idle"}
                   className="rounded-full border border-primary/50 px-5 py-2 text-sm text-primary transition hover:bg-primary/10 disabled:opacity-60">
@@ -566,10 +641,12 @@ function AiMusic() {
               {library.map((row) => (
                 <li key={row.id}>
                   <button onClick={() => open(row)} title={row.prompt}
-                    className="w-full truncate rounded-xl bg-secondary/50 px-3 py-2 text-left text-xs transition hover:bg-secondary">{row.title}</button>
+                    className="w-full truncate rounded-xl bg-secondary/50 px-3 py-2 text-left text-xs transition hover:bg-secondary">{titleCase(row.title)}</button>
                 </li>
               ))}
             </ul>
+            <button onClick={() => { loadLibrary(); setShowSaved(true); }}
+              className="mt-3 rounded-full border border-primary/50 px-4 py-2 text-xs text-primary transition hover:bg-primary/10">View saved</button>
           </div>
         )}
         <div className="glass min-h-0 flex-1 overflow-y-auto rounded-3xl p-5">
@@ -587,110 +664,336 @@ function AiMusic() {
           </ul>
         </div>
       </aside>
+      {showSaved && (
+        <SavedLibraryModal library={library} playingId={playing ? openId : null} onClose={() => setShowSaved(false)}
+          onPlay={open} onPause={() => { stop(); setPlaying(false); }} />
+      )}
+      {editing && song && (
+        <EditMusicModal song={song} onClose={() => setEditing(false)} onApply={(c) => {
+          // An edited piece is a new version, so it can be saved again.
+          setSong(c); setSaved("idle"); setOpenId(null); setEditing(false);
+          if (playing) play(c);
+        }} />
+      )}
     </div>
   );
 }
 
-function Composer() {
-  const [preset, setPreset] = useState("Calm");
-  const [vals, setVals] = useState(PRESETS["Calm"]!.v);
-  const p = PRESETS[preset]!;
-  const health = Math.round(vals.reduce((a, b) => a + b, 0) / vals.length);
+const TOP_DEGREE = 14;
+
+function EditMusicModal({ song, onClose, onApply }: { song: Composition; onClose: () => void; onApply: (c: Composition) => void }) {
+  const [draft, setDraft] = useState(song);
+  const set = (p: Partial<Composition>) => setDraft({ ...draft, ...p });
+  const setNote = (i: number, d: number) => set({ melody: draft.melody.map((x, j) => (j === i ? (x === d ? null : d) : x)) });
+  const resize = (n: number) => set({ melody: n < draft.melody.length ? draft.melody.slice(0, n) : [...draft.melody, ...Array(n - draft.melody.length).fill(null)] });
+  useEffect(() => {
+    const k = (e: KeyboardEvent) => e.key === "Escape" && onClose();
+    window.addEventListener("keydown", k);
+    return () => window.removeEventListener("keydown", k);
+  }, [onClose]);
+  const field = "rounded-full border border-input bg-secondary/60 px-4 py-2 text-sm capitalize outline-none focus:border-primary";
   return (
-    <div className="flex h-full items-center justify-center">
-      <div className="glass flex w-full max-w-5xl flex-col rounded-[2rem] p-8">
-        <div className="flex flex-wrap items-center justify-between gap-4">
-          <div>
-            <h2 className="font-display text-2xl font-semibold text-primary">Ecosystem Composer</h2>
-            <p className="mt-1 text-sm text-muted-foreground">Nature becomes the dataset. AI becomes the interpreter.</p>
-          </div>
-          <div className="flex flex-wrap gap-2">
-            {Object.keys(PRESETS).map((k) => (
-              <button key={k} onClick={() => { setPreset(k); setVals(PRESETS[k]!.v); }}
-                className={`rounded-full px-4 py-1.5 text-sm transition ${k === preset ? "bg-primary text-primary-foreground" : "bg-secondary text-muted-foreground hover:text-foreground"}`}>{k}</button>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/70 backdrop-blur-sm animate-in fade-in" onClick={onClose}>
+      <div role="dialog" aria-modal="true" aria-label="Edit music" onClick={(e) => e.stopPropagation()}
+        className="glass flex max-h-[90vh] w-[min(980px,94vw)] flex-col rounded-[2rem] p-8 animate-in zoom-in-95">
+        <h3 className="font-display text-2xl font-semibold text-primary">Edit “{titleCase(song.title)}”</h3>
+        <div className="mt-5 grid grid-cols-4 gap-4">
+          <label className="flex flex-col gap-1.5">
+            <span className="text-[10px] uppercase tracking-widest text-muted-foreground">Key</span>
+            <select value={draft.key} onChange={(e) => set({ key: e.target.value as Composition["key"] })} className={field}>
+              {KEYS.map((k) => <option key={k} value={k}>{k}</option>)}
+            </select>
+          </label>
+          <label className="flex flex-col gap-1.5">
+            <span className="text-[10px] uppercase tracking-widest text-muted-foreground">Scale</span>
+            <select value={draft.scale} onChange={(e) => set({ scale: e.target.value as Composition["scale"] })} className={field}>
+              {SCALES.map((s) => <option key={s} value={s}>{s}</option>)}
+            </select>
+          </label>
+          <label className="flex flex-col gap-1.5">
+            <span className="text-[10px] uppercase tracking-widest text-muted-foreground">Melody sound</span>
+            <select value={draft.instrument} onChange={(e) => set({ instrument: e.target.value as Composition["instrument"] })} className={field}>
+              {INSTRUMENTS.map((s) => <option key={s} value={s}>{s}</option>)}
+            </select>
+          </label>
+          <label className="flex flex-col gap-1.5">
+            <span className="flex justify-between text-[10px] uppercase tracking-widest text-muted-foreground">Tempo<span className="text-foreground">{draft.bpm} BPM</span></span>
+            <input type="range" min={40} max={120} value={draft.bpm} onChange={(e) => set({ bpm: +e.target.value })} className="mt-2 w-full accent-[var(--primary)]" />
+          </label>
+        </div>
+
+        <div className="mt-6 flex items-baseline justify-between">
+          <p className="text-xs uppercase tracking-widest text-muted-foreground">Melody · click a cell to place a note, click it again for a rest</p>
+          <label className="flex items-center gap-2 text-xs text-muted-foreground">
+            Length
+            <select value={draft.melody.length} onChange={(e) => resize(+e.target.value)} className="rounded-full border border-input bg-secondary/60 px-3 py-1 text-xs outline-none">
+              {[8, 12, 16, 20, 24, 28, 32].map((n) => <option key={n} value={n}>{n} steps</option>)}
+            </select>
+          </label>
+        </div>
+        <div className="mt-2 min-h-0 flex-1 overflow-auto rounded-2xl bg-muted/60 p-3">
+          <div className="grid gap-px" style={{ gridTemplateColumns: `2.5rem repeat(${draft.melody.length}, minmax(1.25rem, 1fr))` }}>
+            {Array.from({ length: TOP_DEGREE + 1 }, (_, r) => TOP_DEGREE - r).map((d) => (
+              <Fragment key={d}>
+                <span className="pr-2 text-right text-[10px] leading-5 text-muted-foreground">{degreeName(draft, d)}</span>
+                {draft.melody.map((x, i) => (
+                  <button key={i} onClick={() => setNote(i, d)} aria-label={`Step ${i + 1}, ${degreeName(draft, d)}`}
+                    className={`h-5 rounded-sm transition ${x === d ? "bg-primary" : i % 4 === 0 ? "bg-track/80 hover:bg-primary/40" : "bg-track/50 hover:bg-primary/40"}`} />
+                ))}
+              </Fragment>
             ))}
           </div>
         </div>
-        <div className="mt-5 grid grid-cols-[1fr_300px] items-start gap-6">
-          <div className="rounded-3xl bg-muted/60 p-5">
-            <div className="flex h-72 items-end justify-between gap-2">
-              {vals.map((v, i) => (
-                <div key={i} className="flex h-full flex-1 flex-col items-center">
-                  <div className="relative h-full w-2 rounded-full bg-track">
-                    <div className="bar-fill absolute bottom-0 w-full rounded-full transition-all duration-500" style={{ height: `${v}%` }} />
-                    <div className="absolute left-1/2 h-5 w-5 -translate-x-1/2 translate-y-1/2 rounded-full border-2 border-primary bg-secondary transition-all duration-500" style={{ bottom: `${v}%` }} />
-                    <input type="range" min={0} max={100} value={v} aria-label={BANDS[i]}
-                      onChange={(e) => setVals(vals.map((x, j) => (j === i ? +e.target.value : x)))}
-                      className="absolute left-1/2 top-0 h-full w-8 -translate-x-1/2 cursor-pointer opacity-0 [writing-mode:vertical-lr] [direction:rtl]" />
-                  </div>
-                  <span className="mt-3 text-xs text-foreground">{BAND_HZ[i]}</span>
-                  <span className="text-[10px] text-muted-foreground">{BANDS[i]}</span>
-                </div>
-              ))}
-            </div>
-          </div>
-          <aside className="flex flex-col gap-3">
-            <div className="rounded-3xl bg-muted/60 p-5">
-              <p className="text-xs uppercase tracking-widest text-muted-foreground">{p.goal}</p>
-              <p className="mt-2 font-display text-lg">{p.eco}</p>
-            </div>
-            <div className="rounded-3xl bg-muted/60 p-5">
-              <p className="text-xs uppercase tracking-widest text-muted-foreground">Acoustic Health Index</p>
-              <p className="mt-1 font-display text-4xl font-semibold text-primary">{health}</p>
-            </div>
-            <div className="rounded-3xl bg-muted/60 p-5">
-              <p className="text-xs uppercase tracking-widest text-muted-foreground">Why this ecosystem</p>
-              <p className="mt-2 text-sm">{p.why}</p>
-            </div>
-          </aside>
+
+        <div className="mt-5 flex justify-end gap-2">
+          <button onClick={onClose} className="rounded-full px-5 py-2 text-sm text-muted-foreground hover:text-foreground">Cancel</button>
+          <button onClick={() => onApply(draft)}
+            className="rounded-full bg-primary px-6 py-2 text-sm font-semibold text-primary-foreground glow">Apply changes</button>
         </div>
       </div>
     </div>
   );
-
 }
 
-function Engine() {
+function SavedLibraryModal({ library, playingId, onClose, onPlay, onPause }: {
+  library: SavedComposition[]; playingId: string | null; onClose: () => void; onPlay: (row: SavedComposition) => void; onPause: () => void;
+}) {
+  useEffect(() => {
+    const k = (e: KeyboardEvent) => e.key === "Escape" && onClose();
+    window.addEventListener("keydown", k);
+    return () => window.removeEventListener("keydown", k);
+  }, [onClose]);
   return (
-    <div className="flex h-full flex-col">
-      <h2 className="font-display text-3xl font-semibold">The Ecological Therapeutic Engine</h2>
-      <p className="mt-2 max-w-2xl text-muted-foreground">Personalized therapeutic soundscapes composed from the acoustic structure of living ecosystems.</p>
-      <div className="mt-8 grid flex-1 grid-cols-5 gap-4">
-        {STAGES.map(([t, d], i) => (
-          <div key={t} className="glass flex flex-col rounded-3xl p-6 transition hover:-translate-y-1">
-            <span className="font-display text-5xl font-light text-primary">0{i + 1}</span>
-            <h3 className="mt-auto font-display text-lg font-semibold">{t}</h3>
-            <p className="mt-2 text-sm text-muted-foreground">{d}</p>
-          </div>
-        ))}
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/70 backdrop-blur-sm animate-in fade-in" onClick={onClose}>
+      <div role="dialog" aria-modal="true" aria-label="Saved music" onClick={(e) => e.stopPropagation()}
+        className="glass flex max-h-[80vh] w-[min(640px,92vw)] flex-col rounded-[2rem] p-8 animate-in zoom-in-95">
+        <div className="flex items-baseline justify-between">
+          <h3 className="font-display text-2xl font-semibold text-primary">Saved music</h3>
+          <span className="text-xs text-muted-foreground">{library.length} {library.length === 1 ? "piece" : "pieces"}</span>
+        </div>
+        {library.length === 0 && <p className="mt-4 text-sm text-muted-foreground">Nothing saved yet. Generate a piece and press Save to add it here.</p>}
+        <ul className="mt-4 min-h-0 flex-1 space-y-2 overflow-y-auto pr-1">
+          {library.map((row) => {
+            const on = row.id === playingId;
+            return (
+              <li key={row.id} className={`flex items-center gap-4 rounded-2xl px-4 py-3 transition ${on ? "bg-primary/15" : "bg-secondary/50"}`}>
+                <button onClick={() => (on ? onPause() : onPlay(row))} aria-label={`${on ? "Pause" : "Play"} ${row.title}`}
+                  className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-primary text-sm text-primary-foreground glow transition hover:scale-105">{on ? "❚❚" : "▶"}</button>
+                <div className="min-w-0 flex-1">
+                  <p className="truncate font-display font-semibold">{titleCase(row.title)}</p>
+                  <p className="truncate text-xs text-muted-foreground">{row.prompt}</p>
+                </div>
+                <span className="shrink-0 text-[10px] text-muted-foreground">{new Date(row.created_at).toLocaleDateString()}</span>
+              </li>
+            );
+          })}
+        </ul>
+        <div className="mt-5 flex justify-end">
+          <button onClick={onClose} className="rounded-full px-5 py-2 text-sm text-muted-foreground hover:text-foreground">Close</button>
+        </div>
       </div>
     </div>
   );
 }
 
-function About({ onStart }: { onStart: () => void }) {
+type AuthMode = "signin" | "signup" | "forgot" | "reset";
+const AUTH_COPY: Record<AuthMode, [title: string, blurb: string, submit: string]> = {
+  signin: ["Welcome back", "Sign in to keep composing your ambiences.", "Sign in"],
+  signup: ["Create your account", "Join EchoNature to save your ambiences and biomes.", "Create account"],
+  forgot: ["Reset your password", "Enter your email and we'll send you a link to choose a new password.", "Send reset link"],
+  reset: ["Choose a new password", "Enter the new password for your account.", "Save new password"],
+};
+
+// Supabase reports an unreachable project as a fetch TypeError rather than an API error.
+const authMessage = (e: { message: string }) =>
+  /fetch|network/i.test(e.message) ? "Couldn't reach the sign-in service. Check your connection and try again." : e.message;
+
+function SignIn({ recovering, onDone }: { recovering: boolean; onDone: () => void }) {
+  const [mode, setMode] = useState<AuthMode>(recovering ? "reset" : "signin");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
+  useEffect(() => { if (recovering) setMode("reset"); }, [recovering]);
+
+  const go = (m: AuthMode) => { setMode(m); setError(""); setNotice(""); };
+
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!supabase) return;
+    setBusy(true); setError(""); setNotice("");
+    try {
+      if (mode === "signin") {
+        const { error } = await supabase.auth.signInWithPassword({ email, password });
+        if (error) return setError(authMessage(error));
+        onDone();
+      } else if (mode === "signup") {
+        const { data, error } = await supabase.auth.signUp({ email, password });
+        if (error) return setError(authMessage(error));
+        // With email confirmation on, there is no session until the link is clicked.
+        if (data.session) onDone();
+        else { go("signin"); setNotice("Check your email for a link to confirm your account, then sign in."); }
+      } else if (mode === "forgot") {
+        const { error } = await supabase.auth.resetPasswordForEmail(email, { redirectTo: window.location.origin });
+        if (error) return setError(authMessage(error));
+        setNotice("If an account exists for that email, a reset link is on its way.");
+      } else {
+        const { error } = await supabase.auth.updateUser({ password });
+        if (error) return setError(authMessage(error));
+        setPassword(""); onDone();
+      }
+    } catch (err) {
+      setError(authMessage(err instanceof Error ? err : { message: "network" }));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const [title, blurb, cta] = AUTH_COPY[mode];
+  const field = "rounded-full border border-input bg-secondary/60 px-5 py-3 text-sm outline-none focus:border-primary";
+  const link = "text-primary hover:underline";
   return (
-    <div className="grid h-full grid-cols-2 items-center gap-10 px-6">
-      <div>
-        <p className="text-xs uppercase tracking-[0.3em] text-primary">Our goal</p>
-        <h1 className="mt-4 font-display text-5xl font-light leading-tight xl:text-6xl">
-          Nature becomes the dataset. <span className="font-semibold text-primary">AI becomes the interpreter.</span>
-        </h1>
-        <p className="mt-6 max-w-xl text-muted-foreground">
-          EchoNature AI is building a bioacoustic foundation model that learns from millions of wildlife recordings. Our mission is to turn the sound of living ecosystems into personalized digital therapeutics — while every listen supports and teaches biodiversity conservation.
+    <div className="flex h-full items-center justify-center">
+      <form onSubmit={submit} className="glass flex w-[min(420px,92vw)] flex-col rounded-[2rem] p-8">
+        <img src={logo} alt="" className="h-14 w-14 self-center rounded-full object-cover" />
+        <h2 className="mt-4 text-center font-display text-3xl font-semibold text-primary">{title}</h2>
+        <p className="mt-2 text-center text-sm text-muted-foreground">{blurb}</p>
+        {!supabase ? (
+          <p className="mt-6 text-center text-sm text-destructive">Sign-in isn't available: the cloud connection isn't configured.</p>
+        ) : (
+          <>
+            {mode !== "reset" && (
+              <label className="mt-6 flex flex-col gap-1.5">
+                <span className="px-2 text-[10px] uppercase tracking-widest text-muted-foreground">Email</span>
+                <input type="email" required autoComplete="email" value={email} onChange={(e) => setEmail(e.target.value)} className={field} />
+              </label>
+            )}
+            {mode !== "forgot" && (
+              <label className={`${mode === "reset" ? "mt-6" : "mt-4"} flex flex-col gap-1.5`}>
+                <span className="px-2 text-[10px] uppercase tracking-widest text-muted-foreground">{mode === "reset" ? "New password" : "Password"}</span>
+                <input type="password" required minLength={6} autoComplete={mode === "signin" ? "current-password" : "new-password"}
+                  value={password} onChange={(e) => setPassword(e.target.value)} className={field} />
+              </label>
+            )}
+            {error && <p className="mt-3 px-2 text-xs text-destructive">{error}</p>}
+            {notice && <p className="mt-3 px-2 text-xs text-primary">{notice}</p>}
+            <button type="submit" disabled={busy}
+              className="mt-6 rounded-full bg-primary px-6 py-3 text-sm font-semibold text-primary-foreground glow transition hover:scale-[1.02] disabled:opacity-50">
+              {busy ? "Please wait…" : cta}
+            </button>
+            {mode === "signin" && (
+              <>
+                <p className="mt-5 text-center text-sm text-muted-foreground">
+                  Forgot your password? <button type="button" onClick={() => go("forgot")} className={link}>Reset it</button>
+                </p>
+                <p className="mt-2 text-center text-sm text-muted-foreground">
+                  New to EchoNature? <button type="button" onClick={() => go("signup")} className={link}>Create an account</button>
+                </p>
+              </>
+            )}
+            {(mode === "signup" || mode === "forgot") && (
+              <p className="mt-5 text-center text-sm text-muted-foreground">
+                {mode === "signup" ? "Already have an account? " : "Remembered it? "}
+                <button type="button" onClick={() => go("signin")} className={link}>Sign in</button>
+              </p>
+            )}
+          </>
+        )}
+      </form>
+    </div>
+  );
+}
+
+const GUIDE: [string, string, View][] = [
+  ["Compose with AI", "In AI Ambience, describe a place or a feeling. The AI writes a melody and arranges nature sounds around it.", "music"],
+  ["Make it yours", "Press Edit to change the key, tempo, scale, melody notes and the instrument that plays them.", "music"],
+  ["Save & replay", "Save the pieces you like. Use View saved to see every piece in your library and play any of them again.", "music"],
+  ["Mix a biome", "In the Biome Equalizer, choose a habitat like Rainforest or Cave. Each slider is one layer; 50 is the normal level.", "equalizer"],
+  ["Build your own", "Tap + Add biome, pick up to six sounds from the library and create a custom biome. It's saved so you can come back to it.", "equalizer"],
+];
+
+const USES: [string, string][] = [
+  ["Wind down before sleep", "Low, steady textures — whale song, cave hum, soft rain — with high, busy layers turned down."],
+  ["Get into focus", "Broadband sounds like wind, rapids or rainfall mask chatter and keep the room from feeling silent."],
+  ["Take a calm break", "A few minutes of slow, regular natural rhythm between tasks helps reset stress."],
+  ["Fuel creative work", "Rich, lively habitats like a rainforest canopy add energy without words to distract you."],
+];
+
+function About({ onGo }: { onGo: (v: View) => void }) {
+  return (
+    <div className="h-full overflow-y-auto px-6 pb-10">
+      <section className="grid min-h-full grid-cols-2 items-center gap-10">
+        <div>
+          <p className="text-xs uppercase tracking-[0.3em] text-primary">Our goal</p>
+          <h1 className="mt-4 font-display text-5xl font-light leading-tight xl:text-6xl">
+            Nature becomes the dataset. <span className="font-semibold text-primary">AI becomes the interpreter.</span>
+          </h1>
+          <p className="mt-6 max-w-xl text-muted-foreground">
+            EchoNature AI is building a bioacoustic foundation model that learns from millions of wildlife recordings. Our mission is to turn the sound of living ecosystems into personalized digital therapeutics — while every listen supports and teaches biodiversity conservation.
+          </p>
+          <div className="mt-8 flex gap-3">
+            <button onClick={() => onGo("music")} className="rounded-full bg-primary px-6 py-3 text-sm font-semibold text-primary-foreground glow transition hover:scale-[1.02]">Start a session</button>
+            <button onClick={() => onGo("equalizer")} className="rounded-full border border-primary/50 px-6 py-3 text-sm text-primary transition hover:bg-primary/10">Open Biome Equalizer</button>
+          </div>
+          <p className="mt-10 text-xs uppercase tracking-widest text-muted-foreground">Scroll to learn how it works ↓</p>
+        </div>
+        <div className="glass rounded-[2rem] p-8">
+          <p className="text-xs uppercase tracking-[0.3em] text-primary">How it helps</p>
+          <ul className="mt-4 space-y-4 text-sm">
+            <li><b>Calm anxiety & stress</b> — soundscapes tuned to slow, regular natural rhythms.</li>
+            <li><b>Focus & create</b> — pick a biome and shape its layers to mask distractions.</li>
+            <li><b>Sleep better</b> — low, steady textures like whale song and cave hum.</li>
+            <li><b>Learn the species</b> — each session reveals the ecosystems behind the sound.</li>
+            <li><b>Gets more personal</b> — mood and listening feedback refine every next session.</li>
+          </ul>
+        </div>
+      </section>
+
+      <section className="mt-16">
+        <p className="text-xs uppercase tracking-[0.3em] text-primary">Getting started</p>
+        <h2 className="mt-3 font-display text-3xl font-semibold">How to use EchoNature</h2>
+        <p className="mt-2 max-w-2xl text-muted-foreground">
+          EchoNature has two tools. AI Ambience composes an original piece from a description; the Biome Equalizer lets you mix real habitat soundscapes by hand. Headphones at a comfortable volume give the best result.
         </p>
-        <button onClick={onStart} className="mt-8 rounded-full bg-primary px-6 py-3 text-sm font-semibold text-primary-foreground glow transition hover:scale-[1.02]">Start a session</button>
-      </div>
-      <div className="glass rounded-[2rem] p-8">
-        <p className="text-xs uppercase tracking-[0.3em] text-primary">How it helps</p>
-        <ul className="mt-4 space-y-4 text-sm">
-          <li><b>Calm anxiety & stress</b> — soundscapes tuned to slow, regular natural rhythms.</li>
-          <li><b>Focus & create</b> — pick a biome and shape its layers to mask distractions.</li>
-          <li><b>Sleep better</b> — low, steady textures like whale song and cave hum.</li>
-          <li><b>Learn the species</b> — each session reveals the ecosystems behind the sound.</li>
-          <li><b>Gets more personal</b> — mood and listening feedback refine every next session.</li>
-        </ul>
-      </div>
+        <div className="mt-6 grid grid-cols-5 gap-4">
+          {GUIDE.map(([t, d, v], i) => (
+            <button key={t} onClick={() => onGo(v)} className="glass flex flex-col rounded-3xl p-6 text-left transition hover:-translate-y-1">
+              <span className="text-xs uppercase tracking-widest text-primary">Step {i + 1}</span>
+              <h3 className="mt-3 font-display text-lg font-semibold">{t}</h3>
+              <p className="mt-2 text-sm text-muted-foreground">{d}</p>
+            </button>
+          ))}
+        </div>
+      </section>
+
+      <section className="mt-16">
+        <p className="text-xs uppercase tracking-[0.3em] text-primary">What to do with it</p>
+        <h2 className="mt-3 font-display text-3xl font-semibold">Ideas for your sessions</h2>
+        <div className="mt-6 grid grid-cols-4 gap-4">
+          {USES.map(([t, d]) => (
+            <div key={t} className="rounded-3xl bg-muted/60 p-6">
+              <h3 className="font-display text-lg font-semibold text-primary">{t}</h3>
+              <p className="mt-2 text-sm text-muted-foreground">{d}</p>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      <section className="mt-16">
+        <p className="text-xs uppercase tracking-[0.3em] text-primary">Under the hood</p>
+        <h2 className="mt-3 font-display text-3xl font-semibold">The Ecological Therapeutic Engine</h2>
+        <p className="mt-2 max-w-2xl text-muted-foreground">Personalized therapeutic soundscapes composed from the acoustic structure of living ecosystems.</p>
+        <div className="mt-6 grid grid-cols-5 gap-4">
+          {STAGES.map(([t, d], i) => (
+            <div key={t} className="glass flex min-h-56 flex-col rounded-3xl p-6 transition hover:-translate-y-1">
+              <span className="font-display text-5xl font-light text-primary">0{i + 1}</span>
+              <h3 className="mt-auto font-display text-lg font-semibold">{t}</h3>
+              <p className="mt-2 text-sm text-muted-foreground">{d}</p>
+            </div>
+          ))}
+        </div>
+      </section>
     </div>
   );
 }
@@ -758,8 +1061,13 @@ function suggestName(picked: string[]) {
 function AddBiomeModal({ taken, onClose, onCreate }: { taken: string[]; onClose: () => void; onCreate: (name: string, layers: Layer[]) => void }) {
   const [name, setName] = useState("");
   const [picked, setPicked] = useState<string[]>([]);
-  const n = name.trim();
-  const valid = n.length > 0 && !taken.includes(n) && picked.length > 0;
+  const typed = name.trim();
+  // With no name typed, use the suggested one, numbered if it's already taken.
+  const suggested = suggestName(picked);
+  let fallback = suggested;
+  for (let i = 2; taken.includes(fallback); i++) fallback = `${suggested} ${i}`;
+  const n = typed || fallback;
+  const valid = !taken.includes(n) && picked.length > 0;
   const toggle = (s: string) => setPicked(picked.includes(s) ? picked.filter((x) => x !== s) : picked.length < 6 ? [...picked, s] : picked);
   useEffect(() => {
     const k = (e: KeyboardEvent) => e.key === "Escape" && onClose();
@@ -771,9 +1079,9 @@ function AddBiomeModal({ taken, onClose, onCreate }: { taken: string[]; onClose:
       <div role="dialog" aria-modal="true" aria-label="Add biome" onClick={(e) => e.stopPropagation()}
         className="glass flex max-h-[80vh] w-[min(820px,92vw)] flex-col rounded-[2rem] p-8 animate-in zoom-in-95">
         <h3 className="font-display text-2xl font-semibold text-primary">Create your biome</h3>
-        <input value={name} onChange={(e) => setName(e.target.value)} placeholder={`Biome name, e.g. ${suggestName(picked)}`} maxLength={24}
+        <input value={name} onChange={(e) => setName(e.target.value)} placeholder={`Biome name (default: ${fallback})`} maxLength={24}
           className="mt-4 rounded-full border border-input bg-secondary/60 px-5 py-2.5 text-sm outline-none focus:border-primary" />
-        {taken.includes(n) && <p className="mt-1 px-2 text-xs text-destructive">That name is already used.</p>}
+        {typed && taken.includes(typed) && <p className="mt-1 px-2 text-xs text-destructive">That name is already used.</p>}
         <p className="mt-5 text-xs uppercase tracking-widest text-muted-foreground">Pick sounds ({picked.length}/6)</p>
         <div className="mt-2 flex min-h-0 flex-1 gap-4">
           <ul className="min-h-0 flex-1 space-y-1.5 overflow-y-auto pr-2">
